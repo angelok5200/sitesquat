@@ -16,10 +16,10 @@ public record  MonitoringPolicy (
 
 
     int scanIntervalMinutes,
-    Set<String> monitoredIds
+    Set<String> monitoredTlds
 ){
     public   MonitoringPolicy {
-        monitoredIds = Set.copyOf(monitoredIds);
+        monitoredTlds = Set.copyOf(monitoredTlds);
             if(scanIntervalMinutes <= 0){
                 throw new IllegalArgumentException("scanIntervalMinutes must be greater than 0");
         }

@@ -10,7 +10,7 @@ import org.tafel.squating.domain.value.TlsSnapshot;
 
 public class DomainObservation {
     private UUID id;
-    private UUID candidateid;
+    private UUID candidateId;
 
     private Instant observedAt;
 
@@ -23,9 +23,9 @@ public class DomainObservation {
     private TlsSnapshot tls;
     private MailSnapshot mail;
 
-    public DomainObservation(UUID candidateid, String contentHash, DnsSnapshot dns, HttpSnapshot http, UUID id, MailSnapshot mail, Instant observedAt, RegistrationSnapshot registration, String screenshotHash, TlsSnapshot tls) {
-        if (candidateid == null) {
-            throw new IllegalArgumentException("candidateid cannot be null");
+    public DomainObservation(UUID candidateId, String contentHash, DnsSnapshot dns, HttpSnapshot http, UUID id, MailSnapshot mail, Instant observedAt, RegistrationSnapshot registration, String screenshotHash, TlsSnapshot tls) {
+        if (candidateId == null) {
+            throw new IllegalArgumentException("candidateId cannot be null");
         }
         if (id == null) {
             throw new IllegalArgumentException("id cannot be null");
@@ -33,7 +33,7 @@ public class DomainObservation {
         if (observedAt == null) {
             throw new IllegalArgumentException("observedAt cannot be null");
         }
-        this.candidateid = candidateid;
+        this.candidateId = candidateId;
         this.contentHash = contentHash;
         this.dns = dns;
         this.http = http;
@@ -49,8 +49,8 @@ public class DomainObservation {
         return id;
     }
 
-    public UUID getCandidateid() {
-        return candidateid;
+    public UUID getCandidateId() {
+        return candidateId;
     }
 
     public Instant getObservedAt() {

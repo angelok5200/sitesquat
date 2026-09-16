@@ -1,38 +1,39 @@
 package org.tafel.squating.analysis;
 
+import java.util.Arrays;
+import java.util.Locale;
+import java.util.Set;
+import java.util.stream.Collectors;
+
 public class SimilarityAnalyserImpl {
-    public SimilarityResult analyze(String candidateContent, String brandContent) {
+    public SimilarityResult analyze(String candidateText, String brandText) {
         // Implement the logic to analyze similarity between candidateDomain and brand
         // This is a placeholder implementation
-        if (candidateContent == null || brandContent == null || candidateContent.isEmpty() || brandContent.isEmpty()) {
-            return  new SimilarityResult(0.0, 0.0, false, false);
+        if (candidateText == null || brandText == null || candidateText.isEmpty() || brandText.isEmpty()) {
+            return  new SimilarityResult(0.0, 0.0, false);
         }
-        double textSimilarity = calculateTextSimilarity(candidateContent, brandContent);
+        double textSimilarity = calculateTextSimilarity(candidateText, brandText);
          // Placeholder for actual text similarity calculation
-        double htmlSimilarity = calculateHtmlSimilarity(candidateContent, brandContent);
-        return new SimilarityResult(textSimilarity, htmlSimilarity, false, false);
+        
+        return new SimilarityResult(textSimilarity, 0.0, false);
     }
 
-    private double calculateTextSimilarity(String candidate, String brand) {
+    private double calculateTextSimilarity(String candidateText, String brandText) {
         // Implement the logic to calculate text similarity
         // This is a placeholder implementation
-        String candidateNormalized = candidate.toLowerCase().trim();
-        String brandNormalized = brand.toLowerCase().trim();
-        if (candidateNormalized.equals(brandNormalized)) {
-            return 1.0; // Exact match
+        Set<String> candidateTokens = tokenize(candidateText);
+        Set<String> brandTokens = tokenize(brandText);
+        if (candidateTokens.isEmpty() || brandTokens.isEmpty()) {
+            return 0.0; 
         }
-        if (candidateNormalized.contains(brandNormalized) || brandNormalized.contains(candidateNormalized)) {
-            return 0.8; // Partial match
-        }
-        return 0.0;
+        Set<String> intersection = candidateTokens.stream().filter(brandTokens::contains).collect(Collectors.toSet());
+        Set<String> union = Set.copyOf(java.util.stream.Stream.concat(candidateTokens.stream(), brandTokens.stream()).collect(Collectors.toSet()));
+        return (double) intersection.size() / union.size();
     }
 
-    private double calculateHtmlSimilarity(String candidate, String brand) {
-        // Implement the logic to calculate HTML similarity
-        // This is a placeholder implementation
-        if (candidate.equals(brand)) {
-            return 1.0; // Exact match
-        }
-        return 0.0;
+    private Set<String> tokenize(String text){
+        return Arrays.stream(
+            text.toLowerCase(Locale.ROOT).replaceAll("[^\\p{L}\\p{N}]", "").trim().split("\\s+")
+        ).filter(token -> !token.isBlank()).collect(Collectors.toSet());
     }
 }

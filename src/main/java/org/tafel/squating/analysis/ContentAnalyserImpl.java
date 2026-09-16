@@ -31,7 +31,7 @@ public class ContentAnalyserImpl implements ContentAnalyser {
         }
         boolean passwordFieldDetected = content.contains("type=\"password\"")||content.contains("type='password'");
         if (passwordFieldDetected) {
-            indicators.add(ContentIndicator.PASSWORD_FIELDS);
+            indicators.add(ContentIndicator.PASSWORD_FIELD);
         }
         boolean walletKeywordsDetected = containsAnyOf(content, ContentRules.WALLET_KEYWORDS);
         if (walletKeywordsDetected) {

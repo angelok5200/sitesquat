@@ -23,13 +23,58 @@ public class CandidateDomain {
     private Instant firstSeen;
     private Instant lastSeen;
 
+    public CandidateDomain(UUID brandid, double confidence, String domain, int editDistance, Instant firstSeen, UUID id, Instant lastSeen, MutationType mutationType, String sourceDomain, CandidateStatus status) {
+        this.brandid = brandid;
+        this.confidence = confidence;
+        this.domain = domain;
+        this.editDistance = editDistance;
+        this.firstSeen = firstSeen;
+        this.id = id;
+        this.lastSeen = lastSeen;
+        this.mutationType = mutationType;
+        this.sourceDomain = sourceDomain;
+        this.status = status;
+    }
+
+    public UUID getId() {
+        return id;
+    }
+
+    public UUID getBrandid() {
+        return brandid;
+    }
+
     public String getDomain() {
         return domain;
     }
 
-    public CandidateDomain(UUID id, UUID brandid, String domain) {
-        this.id = id;
-        this.brandid = brandid;
-        this.domain = domain;
+    public String getSourceDomain() {
+        return sourceDomain;
     }
+
+    public MutationType getMutationType() {
+        return mutationType;
+    }
+
+    public int getEditDistance() {
+        return editDistance;
+    }
+
+    public double getConfidence() {
+        return confidence;
+    }
+
+    public CandidateStatus getStatus() {
+        return status;
+    }
+
+    public Instant getFirstSeen() {
+        return firstSeen;
+    }
+
+    public Instant getLastSeen() {
+        return lastSeen;
+    }
+
+    
 }

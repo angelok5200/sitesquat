@@ -7,53 +7,53 @@ import java.util.UUID;
 import org.tafel.squating.domain.enums.RiskLevel;
 
 public class RiskAssessment {
-    private final UUID id;
-    private final UUID candidateid;
-    private final UUID observationid;
-
+    private UUID id;
+    private UUID candidateId;
     
-    private final int score;
-    private final RiskLevel level;
+    private int totalScore;
+    private RiskLevel riskLevel;
 
-    private final  Instant assessedAt;
-    private final List<RiskReason> reasons;
+    private Instant assessedAt;
+    private List<String> triggeredRuleDescriptions;
 
-    public RiskAssessment(UUID id, UUID candidateid, UUID observationid, int score, RiskLevel level, Instant assessedAt,
-            List<RiskReason> reasons) {
-        this.id = id;
-        this.candidateid = candidateid;
-        this.observationid = observationid;
-        this.score = score;
-        this.level = level;
-        this.assessedAt = assessedAt;
-        this.reasons = List.copyOf(reasons);
+    public RiskAssessment(Instant assessedAt, UUID candidateid, UUID id, RiskLevel riskLevel, int totalScore, List<String> triggeredRuleDescriptions) {
+        
+        if (candidateId == null){
+            throw new IllegalArgumentException("candidateid must not be null");
+        }
+        if (riskLevel == null){
+            throw new IllegalArgumentException("riskLevel must not be null");
+        }
+        this.assessedAt = Instant.now();
+        this.candidateId = candidateid;
+        this.id = id != null ? id : UUID.randomUUID();
+        this.riskLevel = riskLevel;
+        this.totalScore = Math.min(100, Math.max(0, totalScore));
+        this.triggeredRuleDescriptions = triggeredRuleDescriptions != null ? List.copyOf(triggeredRuleDescriptions) : List.of();
     }
 
-    public int getScore() {
-        return score;
+    public UUID getId() {
+        return id;
     }
 
-    public RiskLevel getLevel() {
-        return level;
+    public UUID getCandidateId() {
+        return candidateId;
+    }
+
+    public int getTotalScore() {
+        return totalScore;
+    }
+
+    public RiskLevel getRiskLevel() {
+        return riskLevel;
     }
 
     public Instant getAssessedAt() {
         return assessedAt;
     }
 
-    public List<RiskReason> getReasons() {
-        return reasons;
+    public List<String> getTriggeredRuleDescriptions() {
+        return triggeredRuleDescriptions;
     }
 
-    public UUID getObservationid() {
-        return observationid;
-    }
-    
-    public UUID getCandidateid() {
-        return candidateid;
-    }
-
-    public UUID getId() {
-        return id;
-    }
 }

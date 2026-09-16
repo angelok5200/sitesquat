@@ -5,5 +5,6 @@ public enum MutationType{
         DUPLICATION,
         TRANSPOSITION,
         KEYBOARD,
-        SUBSTITUTION
+        SUBSTITUTION,
+        QWERTZ
     }

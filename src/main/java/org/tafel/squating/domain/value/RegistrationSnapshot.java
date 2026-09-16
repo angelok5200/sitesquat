@@ -2,7 +2,7 @@ package org.tafel.squating.domain.value;
 
 import java.time.Instant;
 
-public record  RegistrationSnapshot(
+public record RegistrationSnapshot(
     String registrar,
     Instant registrationDate,
     Instant expirationDate,

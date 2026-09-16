@@ -3,12 +3,12 @@ package org.tafel.squating.domain.value;
 import java.util.List;
 
 public record  HttpSnapshot(
-    int StatusCode,
-    String finalURL,
+    int statusCode,
+    String finalUrl,
     List<String> redirectChain,
     String title,
     String contentType,
-    long ContentLenght
+    long contentLenght
 ) {
     public   HttpSnapshot{
         redirectChain = List.copyOf(redirectChain);

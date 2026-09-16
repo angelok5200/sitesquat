@@ -10,13 +10,14 @@ public class Brand {
     private UUID id;
     private String name;
     private String primaryDomain;
+    private String referenceUrl;
 
     private Set<String> monitoredIds;
     private MonitoringPolicy monitoringPolicy;
 
     private Instant createdAt;
 
-    public Brand(Instant createdAt, UUID id, Set<String> monitoredIds, MonitoringPolicy monitoringPolicy, String name, String primaryDomain) {
+    public Brand(Instant createdAt, UUID id, Set<String> monitoredIds, MonitoringPolicy monitoringPolicy, String name, String primaryDomain, String referenceUrl) {
         if (id == null) {
             throw new IllegalArgumentException("id cannot be null");
         }
@@ -29,10 +30,15 @@ public class Brand {
         this.monitoringPolicy = monitoringPolicy;
         this.name = name;
         this.primaryDomain = primaryDomain;
+        this.referenceUrl = referenceUrl;
     }
 
     public String getName() {
         return name;
+    }
+
+    public String getReferenceUrl() {
+        return referenceUrl;
     }
 
     public UUID getId() {
@@ -54,7 +60,4 @@ public class Brand {
     public Instant getCreatedAt() {
         return createdAt;
     }
-
-    
-    
 }

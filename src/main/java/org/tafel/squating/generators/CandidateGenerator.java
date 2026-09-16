@@ -1,7 +1,12 @@
 package org.tafel.squating.generators;
 
-import java.util.Set;
+import java.util.List;
+
+import org.tafel.squating.domain.enums.MutationType;
+import org.tafel.squating.domain.model.Brand;
+import org.tafel.squating.domain.model.CandidateDomain;
 
 public interface CandidateGenerator {
-    Set<String> generate (String domain);
+    List<CandidateDomain> generate (Brand brand);
+    MutationType getMutationType();
 }
