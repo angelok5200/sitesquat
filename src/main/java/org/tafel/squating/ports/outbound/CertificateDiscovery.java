@@ -3,5 +3,5 @@ package org.tafel.squating.ports.outbound;
 import java.util.List;
 
 public interface CertificateDiscovery {
-    List<String> findCertificates(String domain);
+    List<String> findCertificate(String domain);
 }

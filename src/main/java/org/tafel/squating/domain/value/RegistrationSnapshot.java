@@ -3,8 +3,8 @@ package org.tafel.squating.domain.value;
 import java.time.Instant;
 
 public record RegistrationSnapshot(
-    String registrar,
+    boolean registered,
     Instant registrationDate,
     Instant expirationDate,
-    boolean registered
+    String registrar
 ) {}

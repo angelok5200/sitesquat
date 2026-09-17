@@ -1,80 +1,94 @@
 package org.tafel.squating.generators;
 
-import java.util.HashSet;
-import java.util.Map;
-import java.util.Set;
-
 import org.springframework.stereotype.Component;
+import org.tafel.squating.domain.enums.CandidateStatus;
 import org.tafel.squating.domain.enums.MutationType;
+import org.tafel.squating.domain.model.Brand;
+import org.tafel.squating.domain.model.CandidateDomain;
+
+import java.time.Instant;
+import java.util.ArrayList;
+import java.util.List;
 
 @Component
-public class SubstitutionGenerator implements TypoGenerator {
-    
-    private static final Map<Character, String> SUBSTITUTIONS = Map.ofEntries(
-        Map.entry('a', "e"),
-        Map.entry('e', "a"),
+public class SubstitutionGenerator implements CandidateGenerator {
 
-        Map.entry('i', "y"),
-        Map.entry('y', "i"),
+@Override
+public List<CandidateDomain> generate(Brand brand) {
+    List<CandidateDomain> result = new ArrayList<>();
 
-        Map.entry('o', "a"),
-        Map.entry('a', "o"),
+    String domain = brand.getPrimaryDomain();
+    int dot = domain.indexOf('.');
 
-        Map.entry('u', "o"),
-        Map.entry('o', "u"),
-
-        Map.entry('c', "k"),
-        Map.entry('k', "c"),
-
-        Map.entry('c', "s"),
-        Map.entry('s', "c"),
-
-        Map.entry('s', "z"),
-        Map.entry('z', "s"),
-
-        Map.entry('f', "v"),
-        Map.entry('v', "f"),
-
-        Map.entry('b', "p"),
-        Map.entry('p', "b"),
-
-        Map.entry('t', "d"),
-        Map.entry('d', "t"),
-
-        Map.entry('g', "k"),
-        Map.entry('k', "g"),
-
-        Map.entry('n', "m"),
-        Map.entry('m', "n")
-    );
-
-    @Override
-    public MutationType mutationType() {
-        // TODO Auto-generated method stub
-        return MutationType.SUBSTITUTION;
-    }
-
-    @Override
-    public Set<String> generate(String domain) {
-        // TODO Auto-generated method stub
-        Set<String> result = new HashSet<>();
-        if (domain == null || domain.isBlank()) {
-            return result;
-        }
-
-        String normalized = domain.toLowerCase();
-        for (int i = 0; i < normalized.length(); i++) {
-            char current = normalized.charAt(i);
-            String replacement = SUBSTITUTIONS.get(current);
-            
-            if (replacement == null) {
-                continue;
-            }
-            for (char r : replacement.toCharArray()) {
-                result.add(normalized.substring(0, i) + r + normalized.substring(i + 1));
-            }
-        }
-
+    if (dot <= 0) {
         return result;
     }
+
+    String name = domain.substring(0, dot);
+    String tld = domain.substring(dot);
+
+    for (int i = 0; i < name.length(); i++) {
+        char original = name.charAt(i);
+
+        if (!Character.isLetterOrDigit(original)) {
+            continue;
+        }
+
+        char[] replacements = replacementsFor(original);
+
+        for (char replacement : replacements) {
+            if (replacement == original) {
+                continue;
+            }
+
+            char[] chars = name.toCharArray();
+            chars[i] = replacement;
+
+            String candidateDomain = new String(chars) + tld;
+            Instant now = Instant.now();
+
+            result.add(new CandidateDomain(
+                null,
+                brand.getId(),
+                candidateDomain,
+                domain,
+                MutationType.SUBSTITUTION,
+                1,
+                1.0,
+                CandidateStatus.GENERATED,
+                now,
+                now
+            ));
+        }
+    }
+
+    return result;
+}
+
+private char[] replacementsFor(char character) {
+    if (character >= 'a' && character <= 'z') {
+        char previous = character == 'a' ? 'z' : (char) (character - 1);
+        char next = character == 'z' ? 'a' : (char) (character + 1);
+        return new char[]{previous, next};
+    }
+
+    if (character >= 'A' && character <= 'Z') {
+        char previous = character == 'A' ? 'Z' : (char) (character - 1);
+        char next = character == 'Z' ? 'A' : (char) (character + 1);
+        return new char[]{previous, next};
+    }
+
+    if (character >= '0' && character <= '9') {
+        char previous = character == '0' ? '9' : (char) (character - 1);
+        char next = character == '9' ? '0' : (char) (character + 1);
+        return new char[]{previous, next};
+    }
+
+    return new char[0];
+}
+
+@Override
+public MutationType getMutationType() {
+    return MutationType.SUBSTITUTION;
+}
 }
