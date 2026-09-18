@@ -19,10 +19,17 @@ public class Alert {
     private final String headline;
     private final String message;
 
-    private boolean acknowledge;
+    private boolean acknowledged;
     private final  Instant createdAt;
 
-    public Alert(boolean acknowledge, UUID brandId, UUID candidateId, Instant createdAt, String domain, String headline, UUID id, String message, RiskLevel severity, AlertType type) {
+    public Alert(UUID id,
+                 UUID brandId,
+                 UUID candidateId,
+                 String domain,
+                 AlertType type,
+                 RiskLevel severity,
+                 String headline,
+                 String message) {
         
         if (brandId == null){
             throw new IllegalArgumentException("brandId must not be null");
@@ -40,7 +47,7 @@ public class Alert {
             throw new IllegalArgumentException("domain must not be null");
         }
 
-        this.acknowledge = acknowledge;
+        this.acknowledged = false;
         this.brandId = brandId;
         this.candidateId = candidateId;
         this.createdAt = Instant.now();
@@ -85,17 +92,14 @@ public class Alert {
     }
 
     public boolean isAcknowledge() {
-        return acknowledge;
+        return acknowledged;
     }
 
     public Instant getCreatedAt() {
         return createdAt;
     }
 
-    public void setAcknowledge(boolean acknowledge) {
-        this.acknowledge = acknowledge;
+    public void setAcknowledge(boolean acknowledged) {
+        this.acknowledged = acknowledged;
     }
-    
-
-
 }

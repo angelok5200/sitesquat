@@ -7,41 +7,58 @@ import org.tafel.squating.domain.enums.CandidateStatus;
 import org.tafel.squating.domain.enums.MutationType;
 
 public class CandidateDomain {
-    private UUID id;
-    private UUID brandid;
 
-    private String domain;
-    private String sourceDomain;
+    private final UUID id;
+    private final UUID brandId;
+    private final String domain;
+    private final String sourceDomain;
+    private final MutationType mutationType;
+    private final int editDistance;
+    private final double confidence;
+    private final CandidateStatus status;
+    private final Instant firstSeen;
+    private final Instant lastSeen;
 
-    private MutationType mutationType;
+    public CandidateDomain(
+            UUID brandId, String domain, String sourceDomain, MutationType mutationType, int editDistance, double confidence, CandidateStatus status, Instant firstSeen, Instant lastSeen) {
+        if (brandId == null) {
+            throw new IllegalArgumentException("brandId must not be null");
+        }
 
-    private int editDistance;
-    private double confidence;
+        if (domain == null || domain.isBlank()) {
+            throw new IllegalArgumentException("domain must not be blank");
+        }
 
-    private CandidateStatus status;
+        if (sourceDomain == null || sourceDomain.isBlank()) {
+            throw new IllegalArgumentException("sourceDomain must not be blank");
+        }
 
-    private Instant firstSeen;
-    private Instant lastSeen;
+        if (mutationType == null) {
+            throw new IllegalArgumentException("mutationType must not be null");
+        }
 
-    public CandidateDomain(UUID brandid, double confidence, String domain, int editDistance, Instant firstSeen, UUID id, Instant lastSeen, MutationType mutationType, String sourceDomain, CandidateStatus status) {
-        this.brandid = brandid;
-        this.confidence = confidence;
+        if (status == null) {
+            throw new IllegalArgumentException("status must not be null");
+        }
+
+        this.id = UUID.randomUUID();
+        this.brandId = brandId;
         this.domain = domain;
-        this.editDistance = editDistance;
-        this.firstSeen = firstSeen;
-        this.id = id;
-        this.lastSeen = lastSeen;
-        this.mutationType = mutationType;
         this.sourceDomain = sourceDomain;
+        this.mutationType = mutationType;
+        this.editDistance = editDistance;
+        this.confidence = confidence;
         this.status = status;
+        this.firstSeen = firstSeen != null ? firstSeen : Instant.now();
+        this.lastSeen = lastSeen != null ? lastSeen : this.firstSeen;
     }
 
     public UUID getId() {
         return id;
     }
 
-    public UUID getBrandid() {
-        return brandid;
+    public UUID getBrandId() {
+        return brandId;
     }
 
     public String getDomain() {
@@ -75,6 +92,4 @@ public class CandidateDomain {
     public Instant getLastSeen() {
         return lastSeen;
     }
-
-    
 }

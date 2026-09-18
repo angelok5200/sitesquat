@@ -2,9 +2,7 @@ package org.tafel.squating.generators;
 
 import java.time.Instant;
 import java.util.ArrayList;
-import java.util.HashSet;
 import java.util.List;
-import java.util.Set;
 
 import org.springframework.stereotype.Component;
 import org.tafel.squating.domain.enums.CandidateStatus;
@@ -17,6 +15,8 @@ public class DuplicationGenerator implements CandidateGenerator  {
 
     public List<CandidateDomain> generate(Brand brand) {
         List<CandidateDomain> result = new ArrayList<>();
+
+        if (brand == null || brand.getPrimaryDomain() == null || brand.getPrimaryDomain().isBlank()) return result;
         String domain = brand.getPrimaryDomain();
         int dot = domain.indexOf('.');
         if (dot <= 0) return result;
@@ -31,16 +31,11 @@ public class DuplicationGenerator implements CandidateGenerator  {
             String candidateDomain = mutated + tld;
             Instant now = Instant.now();
             result.add(new CandidateDomain(
-                null,
                 brand.getId(),
                 candidateDomain,
-                domain,
-                MutationType.DUPLICATION,
-                1,
-                1.0,
-                CandidateStatus.GENERATED,
-                now,
-                now
+                null,
+                MutationType.DUPLICATION, 1, 1.0,
+                CandidateStatus.GENERATED, now, now
             ));
         }
 

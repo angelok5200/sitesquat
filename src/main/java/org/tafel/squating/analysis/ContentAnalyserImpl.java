@@ -1,56 +1,149 @@
 package org.tafel.squating.analysis;
 
-import java.util.HashSet;
+import java.util.EnumSet;
 import java.util.Locale;
 import java.util.Set;
+import java.util.regex.Pattern;
 
 import org.springframework.stereotype.Component;
-import org.tafel.squating.ports.outbound.ContentAnalyser;
 
 @Component
 public class ContentAnalyserImpl implements ContentAnalyser {
 
-    @Override 
-    public ContentAnalysis analyse(String html, String brand) {
-        // Implementation of content analysis logic goes here
-        if (html == null || html.isBlank()) {
-            return new ContentAnalysis(false, false, false, false, false, Set.of());
-        }
-    
-        String content = html.toLowerCase(Locale.ROOT);
-        String normalizedBrand = brand==null ? "" : brand.toLowerCase(Locale.ROOT);
+    private static final Pattern PASSWORD_FIELD =
+            Pattern.compile(
+                    "<input[^>]*type\\s*=\\s*[\"']password[\"'][^>]*>",
+                    Pattern.CASE_INSENSITIVE
+            );
 
-        Set<ContentIndicator> indicators = new HashSet<>();
-        boolean brandMentioned = !normalizedBrand.isBlank() && content.contains(normalizedBrand);
+    private static final Pattern LOGIN_FORM =
+            Pattern.compile(
+                    "<form[^>]*>.*?(login|signin|sign-in|sign in|log in).*?</form>",
+                    Pattern.CASE_INSENSITIVE | Pattern.DOTALL
+            );
+
+    @Override
+    public ContentAnalysis analyse(String html, String brand) {
+        if (html == null || html.isBlank()) {
+            return new ContentAnalysis(
+                    false,
+                    false,
+                    false,
+                    false,
+                    false,
+                    Set.of()
+            );
+        }
+
+        String normalizedHtml = html.toLowerCase(Locale.ROOT);
+        String visibleText = extractVisibleText(html);
+
+        boolean brandMentioned =
+                brand != null
+                        && !brand.isBlank()
+                        && visibleText.contains(
+                                brand.toLowerCase(Locale.ROOT)
+                        );
+
+        boolean loginFormDetected =
+                LOGIN_FORM.matcher(normalizedHtml).find()
+                        || containsKeyword(
+                                visibleText,
+                                ContentRules.LOGIN_KEYWORDS
+                        );
+
+        boolean passwordFieldDetected =
+                PASSWORD_FIELD.matcher(normalizedHtml).find();
+
+        boolean walletKeywordsDetected =
+                containsKeyword(
+                        visibleText,
+                        ContentRules.WALLET_KEYWORDS
+                );
+
+        boolean paymentKeywordsDetected =
+                containsKeyword(
+                        visibleText,
+                        ContentRules.PAYMENT_KEYWORDS
+                );
+
+        EnumSet<ContentIndicator> indicators =
+                EnumSet.noneOf(ContentIndicator.class);
+
         if (brandMentioned) {
             indicators.add(ContentIndicator.BRAND_MENTIONED);
         }
-        boolean loginFormDetected = content.contains("<form") && containsAnyOf(content, ContentRules.LOGIN_KEYWORDS);
+
         if (loginFormDetected) {
             indicators.add(ContentIndicator.LOGIN_FORM);
         }
-        boolean passwordFieldDetected = content.contains("type=\"password\"")||content.contains("type='password'");
+
         if (passwordFieldDetected) {
             indicators.add(ContentIndicator.PASSWORD_FIELD);
         }
-        boolean walletKeywordsDetected = containsAnyOf(content, ContentRules.WALLET_KEYWORDS);
+
         if (walletKeywordsDetected) {
             indicators.add(ContentIndicator.WALLET_KEYWORDS);
         }
-        boolean paymentKeywordsDetected = containsAnyOf(content, ContentRules.PAYMENT_KEYWORDS);
+
         if (paymentKeywordsDetected) {
             indicators.add(ContentIndicator.PAYMENT_KEYWORDS);
         }
-        // Continue implementing other detection logic...
-        return new ContentAnalysis(brandMentioned, loginFormDetected, passwordFieldDetected, walletKeywordsDetected, paymentKeywordsDetected, indicators);
+
+        return new ContentAnalysis(
+                brandMentioned,
+                loginFormDetected,
+                passwordFieldDetected,
+                walletKeywordsDetected,
+                paymentKeywordsDetected,
+                indicators
+        );
     }
-    private boolean containsAnyOf(String content, Set<String> keywords) {
+
+    private boolean containsKeyword(
+            String text,
+            Set<String> keywords
+    ) {
         for (String keyword : keywords) {
-            if (content.contains(keyword)) {
+            if (text.contains(keyword)) {
                 return true;
             }
         }
+
         return false;
     }
-}
 
+    private String extractVisibleText(String html) {
+        return html
+                .replaceAll(
+                        "(?is)<script[^>]*>.*?</script>",
+                        " "
+                )
+                .replaceAll(
+                        "(?is)<style[^>]*>.*?</style>",
+                        " "
+                )
+                .replaceAll(
+                        "(?is)<noscript[^>]*>.*?</noscript>",
+                        " "
+                )
+                .replaceAll(
+                        "(?is)<[^>]+>",
+                        " "
+                )
+                .replaceAll(
+                        "&nbsp;",
+                        " "
+                )
+                .replaceAll(
+                        "&amp;",
+                        "&"
+                )
+                .replaceAll(
+                        "\\s+",
+                        " "
+                )
+                .trim()
+                .toLowerCase(Locale.ROOT);
+    }
+}

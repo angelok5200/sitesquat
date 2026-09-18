@@ -6,6 +6,6 @@ public record  MailSnapshot(
     boolean mxConfigured
 ) {
     public  MailSnapshot{
-        mxRecords = List.copyOf(mxRecords);
+        mxRecords = mxRecords != null ? List.copyOf(mxRecords) : List.of();
     }
 }

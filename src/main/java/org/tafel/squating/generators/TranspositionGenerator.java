@@ -2,9 +2,7 @@ package org.tafel.squating.generators;
 
 import java.time.Instant;
 import java.util.ArrayList;
-import java.util.HashSet;
 import java.util.List;
-import java.util.Set;
 
 import org.springframework.stereotype.Component;
 import org.tafel.squating.domain.enums.CandidateStatus;
@@ -17,6 +15,9 @@ public class TranspositionGenerator implements CandidateGenerator  {
     
 public List<CandidateDomain> generate(Brand brand) {
         List<CandidateDomain> result = new ArrayList<>();
+                
+        if (brand == null || brand.getPrimaryDomain() == null || brand.getPrimaryDomain().isBlank()) return result;
+
         String domain = brand.getPrimaryDomain();
         int dot = domain.indexOf('.');
         if (dot <= 0) return result;
@@ -24,27 +25,27 @@ public List<CandidateDomain> generate(Brand brand) {
         String name = domain.substring(0, dot);
         String tld = domain.substring(dot);
 
-        for (int i = 0; i < name.length() - 1; i++) {
-            if (name.charAt(i) == name.charAt(i + 1)) continue;
-            char[] chars = name.toCharArray();
-            char temp = chars[i];
-            chars[i] = chars[i + 1];
-            chars[i + 1] = temp;
+        if(name.length() < 2) return result;
 
-            String mutated = new String(chars);
-            String candidateName = mutated + tld;
+        for (int i = 0; i < name.length() - 1; i++) {
+            
+            char first = name.charAt(i);
+            char second = name.charAt(i + 1);
+
+            if(first == second) continue;
+
+            char[] chars = name.toCharArray();
+            chars[i] = second;
+            chars[i + 1] = first;
+
+            String candidateName = new String(chars) + tld;
             Instant now = Instant.now();
             result.add(new CandidateDomain(
-                null,
                 brand.getId(),
                 candidateName,
-                domain,
-                MutationType.TRANSPOSITION,
-                1,
-                1.0,
-                CandidateStatus.GENERATED,
-                now,
-                now
+                null,
+                MutationType.TRANSPOSITION, 1, 1.0,
+                CandidateStatus.GENERATED, now, now
             ));
         }
 

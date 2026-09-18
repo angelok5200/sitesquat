@@ -1,14 +1,14 @@
 package org.tafel.squating.generators;
 
+import java.time.Instant;
+import java.util.ArrayList;
+import java.util.List;
+
 import org.springframework.stereotype.Component;
 import org.tafel.squating.domain.enums.CandidateStatus;
 import org.tafel.squating.domain.enums.MutationType;
 import org.tafel.squating.domain.model.Brand;
 import org.tafel.squating.domain.model.CandidateDomain;
-
-import java.time.Instant;
-import java.util.ArrayList;
-import java.util.List;
 
 @Component
 public class SubstitutionGenerator implements CandidateGenerator {
@@ -16,6 +16,9 @@ public class SubstitutionGenerator implements CandidateGenerator {
 @Override
 public List<CandidateDomain> generate(Brand brand) {
     List<CandidateDomain> result = new ArrayList<>();
+        
+    if (brand == null || brand.getPrimaryDomain() == null || brand.getPrimaryDomain().isBlank()) return result;
+
 
     String domain = brand.getPrimaryDomain();
     int dot = domain.indexOf('.');
@@ -48,16 +51,11 @@ public List<CandidateDomain> generate(Brand brand) {
             Instant now = Instant.now();
 
             result.add(new CandidateDomain(
-                null,
                 brand.getId(),
                 candidateDomain,
-                domain,
-                MutationType.SUBSTITUTION,
-                1,
-                1.0,
-                CandidateStatus.GENERATED,
-                now,
-                now
+                null,
+                MutationType.SUBSTITUTION, 1, 1.0,
+                CandidateStatus.GENERATED, now, now
             ));
         }
     }

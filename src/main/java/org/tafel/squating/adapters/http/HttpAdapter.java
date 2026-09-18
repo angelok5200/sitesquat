@@ -1,12 +1,14 @@
 package org.tafel.squating.adapters.http;
 
+import java.io.IOException;
 import java.net.URI;
 import java.net.http.HttpClient;
 import java.net.http.HttpRequest;
 import java.net.http.HttpResponse;
-import java.time.Duration;
 import java.util.ArrayList;
 import java.util.List;
+import java.util.regex.Matcher;
+import java.util.regex.Pattern;
 
 import org.springframework.stereotype.Component;
 import org.tafel.squating.domain.value.HttpSnapshot;
@@ -15,99 +17,137 @@ import org.tafel.squating.ports.outbound.WebInspector;
 @Component
 public class HttpAdapter implements WebInspector {
 
+    private static final String USER_AGENT =
+            "Mozilla/5.0 (compatible; SiteSquating/1.0)";
+
+    private static final int MAX_REDIRECTS = 10;
+
+    private static final Pattern TITLE_PATTERN =
+            Pattern.compile(
+                    "<title[^>]*>(.*?)</title>",
+                    Pattern.CASE_INSENSITIVE
+                            | Pattern.DOTALL
+            );
+
     private final HttpClient httpClient;
 
-    public HttpAdapter() {
-        this.httpClient = HttpClient.newBuilder()
-            .connectTimeout(Duration.ofSeconds(10))
-            .followRedirects(HttpClient.Redirect.NORMAL)
-            .build();
+    public HttpAdapter(HttpClient httpClient) {
+        this.httpClient = httpClient;
     }
 
     @Override
     public HttpSnapshot inspect(String domain) {
         if (domain == null || domain.isBlank()) {
-            throw new IllegalArgumentException(
-                "domain must not be blank"
-            );
+            throw new IllegalArgumentException("domain must not be blank");
         }
 
-        String url = normalizeUrl(domain);
+        URI initialUri = createInitialUri(domain);
 
-        try {
+        List<String> redirectChain = new ArrayList<>();
+
+        URI currentUri = initialUri;
+
+        for (int redirectCount = 0;
+             redirectCount <= MAX_REDIRECTS;
+             redirectCount++) {
+
             HttpRequest request = HttpRequest.newBuilder()
-                .uri(URI.create(url))
-                .timeout(Duration.ofSeconds(15))
-                .header(
-                    "User-Agent",
-                    "Mozilla/5.0"
-                )
-                .GET()
-                .build();
+                    .uri(currentUri)
+                    .header("User-Agent", USER_AGENT)
+                    .header("Accept", "text/html,application/xhtml+xml,*/*")
+                    .GET()
+                    .build();
 
-            HttpResponse<String> response =
-                httpClient.send(
-                    request,
-                    HttpResponse.BodyHandlers.ofString()
+            try {
+                HttpResponse<String> response =
+                        httpClient.send(
+                                request,
+                                HttpResponse.BodyHandlers.ofString()
+                        );
+
+                int statusCode = response.statusCode();
+
+                if (isRedirect(statusCode)) {
+                    String location =
+                            response.headers()
+                                    .firstValue("Location")
+                                    .orElse(null);
+
+                    if (location == null || location.isBlank()) {
+                        return createSnapshot(
+                                response,
+                                currentUri,
+                                redirectChain
+                        );
+                    }
+
+                    URI nextUri = currentUri.resolve(location);
+
+                    redirectChain.add(nextUri.toString());
+                    currentUri = nextUri;
+
+                    continue;
+                }
+
+                return createSnapshot(
+                        response,
+                        currentUri,
+                        redirectChain
                 );
 
-            List<String> redirectChain =
-                buildRedirectChain(response);
+            } catch (InterruptedException e) {
+                Thread.currentThread().interrupt();
 
-            String contentType =
-                response.headers()
-                    .firstValue("Content-Type")
-                    .orElse(null);
+                throw new IllegalStateException(
+                        "HTTP inspection interrupted for " + domain,
+                        e
+                );
 
-            String title =
-                extractTitle(response.body());
-
-            long contentLength =
-                response.body() != null
-                    ? response.body().getBytes().length
-                    : 0;
-
-            return new HttpSnapshot(
-                response.statusCode(),
-                response.uri().toString(),
-                redirectChain,
-                title,
-                contentType,
-                contentLength
-            );
-
-        } catch (Exception e) {
-            return new HttpSnapshot(
-                0,
-                url,
-                List.of(),
-                null,
-                null,
-                0
-            );
+            } catch (IOException e) {
+                throw new IllegalStateException(
+                        "HTTP inspection failed for " + domain,
+                        e
+                );
+            }
         }
+
+        throw new IllegalStateException(
+                "Maximum HTTP redirects exceeded for " + domain
+        );
     }
 
-    private String normalizeUrl(String domain) {
+    private HttpSnapshot createSnapshot(
+            HttpResponse<String> response,
+            URI finalUri,
+            List<String> redirectChain
+    ) {
+        String body = response.body();
+
+        return new HttpSnapshot(
+                response.statusCode(),
+                finalUri.toString(),
+                redirectChain,
+                extractTitle(body),
+                response.headers()
+                        .firstValue("Content-Type")
+                        .orElse(null),
+                body != null ? body.getBytes().length : 0
+        );
+    }
+
+    private URI createInitialUri(String domain) {
         String normalized = domain.trim();
 
-        if (!normalized.startsWith("http://") &&
-            !normalized.startsWith("https://")) {
-
-            normalized = "https://" + normalized;
+        if (normalized.startsWith("http://")
+                || normalized.startsWith("https://")) {
+            return URI.create(normalized);
         }
 
-        return normalized;
+        return URI.create("https://" + normalized);
     }
 
-    private List<String> buildRedirectChain(
-        HttpResponse<String> response
-    ) {
-        List<String> chain = new ArrayList<>();
-
-        chain.add(response.uri().toString());
-
-        return List.copyOf(chain);
+    private boolean isRedirect(int statusCode) {
+        return statusCode >= 300 && statusCode < 400;
     }
 
     private String extractTitle(String html) {
@@ -115,27 +155,14 @@ public class HttpAdapter implements WebInspector {
             return null;
         }
 
-        String lower = html.toLowerCase();
+        Matcher matcher = TITLE_PATTERN.matcher(html);
 
-        int start = lower.indexOf("<title>");
-
-        if (start < 0) {
+        if (!matcher.find()) {
             return null;
         }
 
-        int contentStart = start + "<title>".length();
-
-        int end = lower.indexOf(
-            "</title>",
-            contentStart
-        );
-
-        if (end < 0) {
-            return null;
-        }
-
-        return html
-            .substring(contentStart, end)
-            .trim();
+        return matcher.group(1)
+                .replaceAll("\\s+", " ")
+                .trim();
     }
 }

@@ -1,14 +1,15 @@
 package org.tafel.squating.adapters.certificate;
 
+import java.io.IOException;
 import java.net.URI;
 import java.net.URLEncoder;
 import java.net.http.HttpClient;
 import java.net.http.HttpRequest;
 import java.net.http.HttpResponse;
 import java.nio.charset.StandardCharsets;
-import java.time.Duration;
-import java.util.ArrayList;
+import java.util.LinkedHashSet;
 import java.util.List;
+import java.util.Set;
 
 import org.springframework.stereotype.Component;
 import org.tafel.squating.ports.outbound.CertificateDiscovery;
@@ -20,148 +21,108 @@ import com.fasterxml.jackson.databind.ObjectMapper;
 public class CertificateAdapter implements CertificateDiscovery {
 
     private static final String CRT_SH_URL =
-        "https://crt.sh/?q=%25s&output=json";
+            "https://crt.sh/?q=%25.%s&output=json";
 
     private final HttpClient httpClient;
     private final ObjectMapper objectMapper;
 
-    public CertificateAdapter(ObjectMapper objectMapper) {
-        this.httpClient = HttpClient.newBuilder()
-            .connectTimeout(Duration.ofSeconds(10))
-            .build();
-
+    public CertificateAdapter(
+            HttpClient httpClient,
+            ObjectMapper objectMapper
+    ) {
+        this.httpClient = httpClient;
         this.objectMapper = objectMapper;
     }
 
     @Override
-    public List<String> findCertificate(String domain) {
+    public List<String> findCertificates(String domain) {
         if (domain == null || domain.isBlank()) {
-            throw new IllegalArgumentException(
-                "domain must not be blank"
-            );
+            throw new IllegalArgumentException("domain must not be blank");
         }
 
-        String normalizedDomain =
-            normalizeDomain(domain);
+        String normalizedDomain = normalizeDomain(domain);
 
-        String encodedDomain =
-            URLEncoder.encode(
-                "%." + normalizedDomain,
+        String encodedDomain = URLEncoder.encode(
+                normalizedDomain,
                 StandardCharsets.UTF_8
-            );
+        );
 
-        String url =
-            String.format(
-                CRT_SH_URL,
-                encodedDomain
-            );
+        URI uri = URI.create(
+                String.format(CRT_SH_URL, encodedDomain)
+        );
 
-        HttpRequest request =
-            HttpRequest.newBuilder()
-                .uri(URI.create(url))
-                .timeout(Duration.ofSeconds(15))
+        HttpRequest request = HttpRequest.newBuilder()
+                .uri(uri)
                 .header(
-                    "Accept",
-                    "application/json"
+                        "User-Agent",
+                        "Mozilla/5.0 (compatible; SiteSquating/1.0)"
                 )
-                .header(
-                    "User-Agent",
-                    "SiteSquatingMonitor/1.0"
-                )
+                .header("Accept", "application/json")
                 .GET()
                 .build();
 
         try {
-            HttpResponse<String> response =
-                httpClient.send(
+            HttpResponse<String> response = httpClient.send(
                     request,
                     HttpResponse.BodyHandlers.ofString()
-                );
+            );
 
-            if (response.statusCode() != 200) {
+            if (response.statusCode() < 200
+                    || response.statusCode() >= 300) {
                 return List.of();
             }
 
-            JsonNode root =
-                objectMapper.readTree(response.body());
+            JsonNode root = objectMapper.readTree(response.body());
 
             if (!root.isArray()) {
                 return List.of();
             }
 
-            List<String> certificates =
-                new ArrayList<>();
+            Set<String> certificates = new LinkedHashSet<>();
 
             for (JsonNode certificate : root) {
-                String commonName =
-                    certificate
-                        .path("common_name")
-                        .asText(null);
+                addValue(
+                        certificates,
+                        certificate.path("common_name").asText(null)
+                );
 
-                if (commonName != null &&
-                    !commonName.isBlank()) {
+                String nameValue =
+                        certificate.path("name_value").asText(null);
 
-                    certificates.add(commonName);
-                }
-
-                JsonNode nameValue =
-                    certificate.get("name_value");
-
-                if (nameValue == null ||
-                    nameValue.isNull()) {
-                    continue;
-                }
-
-                String[] names =
-                    nameValue.asText().split("\\R");
-
-                for (String name : names) {
-                    String normalized =
-                        name.trim().toLowerCase();
-
-                    if (!normalized.isBlank()) {
-                        certificates.add(normalized);
+                if (nameValue != null) {
+                    for (String value : nameValue.split("\\R")) {
+                        addValue(certificates, value);
                     }
                 }
             }
 
-            return certificates.stream()
-                .distinct()
-                .toList();
+            return List.copyOf(certificates);
 
-        } catch (Exception e) {
+        } catch (InterruptedException e) {
+            Thread.currentThread().interrupt();
+            return List.of();
+
+        } catch (IOException | IllegalArgumentException e) {
             return List.of();
         }
     }
 
+    private void addValue(Set<String> values, String value) {
+        if (value == null || value.isBlank()) {
+            return;
+        }
+
+        values.add(value.trim().toLowerCase());
+    }
+
     private String normalizeDomain(String domain) {
-        String normalized =
-            domain.trim().toLowerCase();
-
-        if (normalized.startsWith("https://")) {
-            normalized =
-                normalized.substring(8);
-        }
-
-        if (normalized.startsWith("http://")) {
-            normalized =
-                normalized.substring(7);
-        }
-
-        int slash =
-            normalized.indexOf('/');
-
-        if (slash >= 0) {
-            normalized =
-                normalized.substring(0, slash);
-        }
+        String normalized = domain.trim().toLowerCase();
 
         if (normalized.endsWith(".")) {
-            normalized =
-                normalized.substring(
+            normalized = normalized.substring(
                     0,
                     normalized.length() - 1
-                );
+            );
         }
 
         return normalized;

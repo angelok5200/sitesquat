@@ -1,9 +1,12 @@
 package org.tafel.squating.adapters.dns;
 
+import java.util.ArrayList;
+import java.util.List;
 
 import org.springframework.stereotype.Component;
 import org.tafel.squating.domain.value.DnsSnapshot;
 import org.tafel.squating.ports.outbound.DnsInspector;
+import org.xbill.DNS.AAAARecord;
 import org.xbill.DNS.ARecord;
 import org.xbill.DNS.CNAMERecord;
 import org.xbill.DNS.Lookup;
@@ -11,10 +14,8 @@ import org.xbill.DNS.MXRecord;
 import org.xbill.DNS.NSRecord;
 import org.xbill.DNS.Record;
 import org.xbill.DNS.TXTRecord;
+import org.xbill.DNS.TextParseException;
 import org.xbill.DNS.Type;
-
-import java.util.ArrayList;
-import java.util.List;
 
 @Component
 public class DnsAdapter implements DnsInspector {
@@ -22,114 +23,111 @@ public class DnsAdapter implements DnsInspector {
     @Override
     public DnsSnapshot inspect(String domain) {
         if (domain == null || domain.isBlank()) {
-            throw new IllegalArgumentException(
-                "domain must not be blank"
-            );
+            throw new IllegalArgumentException("domain must not be blank");
         }
 
         String normalizedDomain = normalizeDomain(domain);
 
-        List<String> a = lookup(
-            normalizedDomain,
-            Type.A
-        );
-
-        List<String> aaa = lookup(
-            normalizedDomain,
-            Type.AAAA
-        );
-
-        List<String> txt = lookup(
-            normalizedDomain,
-            Type.TXT
-        );
-
-        List<String> mx = lookup(
-            normalizedDomain,
-            Type.MX
-        );
-
-        List<String> ns = lookup(
-            normalizedDomain,
-            Type.NS
-        );
-
-        List<String> cname = lookup(
-            normalizedDomain,
-            Type.CNAME
-        );
-
         return new DnsSnapshot(
-            a,
-            aaa,
-            txt,
-            mx,
-            ns,
-            cname
+                lookupA(normalizedDomain),
+                lookupAaaa(normalizedDomain),
+                lookupTxt(normalizedDomain),
+                lookupMx(normalizedDomain),
+                lookupNs(normalizedDomain),
+                lookupCname(normalizedDomain)
         );
     }
 
-    private List<String> lookup(
-        String domain,
-        int recordType
+    private List<String> lookupA(String domain) {
+        return lookup(domain, Type.A, ARecord.class)
+                .stream()
+                .map(record -> ((ARecord) record).getAddress().getHostAddress())
+                .toList();
+    }
+
+    private List<String> lookupAaaa(String domain) {
+        return lookup(domain, Type.AAAA, AAAARecord.class)
+                .stream()
+                .map(record -> ((AAAARecord) record).getAddress().getHostAddress())
+                .toList();
+    }
+
+    private List<String> lookupTxt(String domain) {
+        return lookup(domain, Type.TXT, TXTRecord.class)
+                .stream()
+                .map(record -> ((TXTRecord) record).getStrings())
+                .flatMap(List::stream)
+                .toList();
+    }
+
+    private List<String> lookupMx(String domain) {
+        return lookup(domain, Type.MX, MXRecord.class)
+                .stream()
+                .map(record -> ((MXRecord) record).getTarget().toString())
+                .map(this::removeTrailingDot)
+                .toList();
+    }
+
+    private List<String> lookupNs(String domain) {
+        return lookup(domain, Type.NS, NSRecord.class)
+                .stream()
+                .map(record -> ((NSRecord) record).getTarget().toString())
+                .map(this::removeTrailingDot)
+                .toList();
+    }
+
+    private List<String> lookupCname(String domain) {
+        return lookup(domain, Type.CNAME, CNAMERecord.class)
+                .stream()
+                .map(record -> ((CNAMERecord) record).getTarget().toString())
+                .map(this::removeTrailingDot)
+                .toList();
+    }
+
+    private <T extends Record> List<T> lookup(
+            String domain,
+            int type,
+            Class<T> recordType
     ) {
         try {
-            Lookup lookup = new Lookup(domain, recordType);
-
+            Lookup lookup = new Lookup(domain, type);
             Record[] records = lookup.run();
 
             if (records == null) {
                 return List.of();
             }
 
-            List<String> result = new ArrayList<>();
+            List<T> result = new ArrayList<>();
 
             for (Record record : records) {
-                result.add(formatRecord(record));
+                if (recordType.isInstance(record)) {
+                    result.add(recordType.cast(record));
+                }
             }
 
-            return List.copyOf(result);
-
-        } catch (Exception e) {
+            return result;
+        } catch (TextParseException | IllegalArgumentException e) {
             return List.of();
         }
-    }
-
-    private String formatRecord(Record record) {
-
-        if (record instanceof ARecord aRecord) {
-            return aRecord.getAddress().getHostAddress();
-        }
-
-        if (record instanceof CNAMERecord cnameRecord) {
-            return cnameRecord.getTarget().toString();
-        }
-
-        if (record instanceof MXRecord mxRecord) {
-            return mxRecord.getPriority()
-                + " "
-                + mxRecord.getTarget();
-        }
-
-        if (record instanceof NSRecord nsRecord) {
-            return nsRecord.getTarget().toString();
-        }
-
-        if (record instanceof TXTRecord txtRecord) {
-            return txtRecord.rdataToString();
-        }
-
-        return record.rdataToString();
     }
 
     private String normalizeDomain(String domain) {
         String normalized = domain.trim().toLowerCase();
 
         if (normalized.endsWith(".")) {
-            normalized =
-                normalized.substring(0, normalized.length() - 1);
+            normalized = normalized.substring(0, normalized.length() - 1);
         }
 
         return normalized;
+    }
+
+    private String removeTrailingDot(String value) {
+        if (value == null) {
+            return null;
+        }
+
+        return value.endsWith(".")
+                ? value.substring(0, value.length() - 1)
+                : value;
     }
 }

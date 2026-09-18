@@ -11,6 +11,6 @@ public record ContentAnalysis (
      Set<ContentIndicator> matchedIndicators
 ){
     public ContentAnalysis {
-        matchedIndicators = Set.copyOf(matchedIndicators);
+        matchedIndicators = matchedIndicators != null ? Set.copyOf(matchedIndicators) : Set.of();
     }
 }

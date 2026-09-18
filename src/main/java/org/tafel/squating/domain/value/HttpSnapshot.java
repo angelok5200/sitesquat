@@ -11,6 +11,6 @@ public record  HttpSnapshot(
     long contentLenght
 ) {
     public   HttpSnapshot{
-        redirectChain = List.copyOf(redirectChain);
+        redirectChain = redirectChain != null ? List.copyOf(redirectChain) : List.of();
     }
 }

@@ -19,125 +19,123 @@ import org.tafel.squating.ports.outbound.CandidateRepository;
 @Service
 public class CandidateGenerationService implements ScanCandidatesUseCase {
 
-private final BrandRepository brandRepository;
-private final CandidateRepository candidateRepository;
-private final List<CandidateGenerator> generators;
+    private final BrandRepository brandRepository;
+    private final CandidateRepository candidateRepository;
+    private final List<CandidateGenerator> generators;
 
-public CandidateGenerationService(
-    BrandRepository brandRepository,
-    CandidateRepository candidateRepository,
-    List<CandidateGenerator> generators
-) {
-    this.brandRepository = brandRepository;
-    this.candidateRepository = candidateRepository;
-    this.generators = generators;
-}
-
-@Override
-public List<CandidateDomain> generateCandidates(UUID brandId) {
-    Brand brand = brandRepository.findById(brandId)
-        .orElseThrow(() ->
-            new IllegalArgumentException("Brand not found: " + brandId)
-        );
-
-    Set<String> monitoredTlds =
-        brand.getMonitoringPolicy().monitoredTlds();
-
-    if (monitoredTlds == null || monitoredTlds.isEmpty()) {
-        return List.of();
+    public CandidateGenerationService(
+            BrandRepository brandRepository,
+            CandidateRepository candidateRepository,
+            List<CandidateGenerator> generators
+    ) {
+        this.brandRepository = brandRepository;
+        this.candidateRepository = candidateRepository;
+        this.generators = generators;
     }
 
-    Map<String, CandidateDomain> uniqueCandidates =
-        new LinkedHashMap<>();
+    @Override
+    public List<CandidateDomain> generateCandidates(UUID brandId) {
+        Brand brand = brandRepository.findById(brandId)
+                .orElseThrow(() ->
+                        new IllegalArgumentException("Brand not found: " + brandId));
 
-    for (CandidateGenerator generator : generators) {
-        List<CandidateDomain> generated = generator.generate(brand);
+        Set<String> monitoredTlds =
+                brand.getMonitoringPolicy().monitoredTlds();
 
-        for (CandidateDomain candidate : generated) {
-            String candidateLabel = extractLabel(candidate.getDomain());
+        if (monitoredTlds == null || monitoredTlds.isEmpty()) {
+            return List.of();
+        }
 
-            if (candidateLabel == null || candidateLabel.isBlank()) {
-                continue;
-            }
+        Map<String, CandidateDomain> uniqueCandidates =
+                new LinkedHashMap<>();
 
-            for (String tld : monitoredTlds) {
-                String normalizedTld = normalizeTld(tld);
+        for (CandidateGenerator generator : generators) {
+            List<CandidateDomain> generated = generator.generate(brand);
 
-                if (normalizedTld.isBlank()) {
+            for (CandidateDomain candidate : generated) {
+                String candidateLabel =
+                        extractLabel(candidate.getDomain());
+
+                if (candidateLabel == null || candidateLabel.isBlank()) {
                     continue;
                 }
 
-                String candidateDomain =
-                    candidateLabel + "." + normalizedTld;
+                for (String tld : monitoredTlds) {
+                    String normalizedTld = normalizeTld(tld);
 
-                if (candidateDomain.equalsIgnoreCase(
-                    brand.getPrimaryDomain()
-                )) {
-                    continue;
+                    if (normalizedTld.isBlank()) {
+                        continue;
+                    }
+
+                    String candidateDomain =
+                            candidateLabel + "." + normalizedTld;
+
+                    if (candidateDomain.equalsIgnoreCase(
+                            brand.getPrimaryDomain())) {
+                        continue;
+                    }
+
+                    CandidateDomain tldCandidate =
+                            new CandidateDomain(
+                                    candidate.getBrandId(),
+                                    candidateDomain,
+                                    candidate.getSourceDomain(),
+                                    candidate.getMutationType(),
+                                    candidate.getEditDistance(),
+                                    candidate.getConfidence(),
+                                    candidate.getStatus(),
+                                    candidate.getFirstSeen(),
+                                    Instant.now()
+                            );
+
+                    uniqueCandidates.putIfAbsent(
+                            candidateDomain.toLowerCase(),
+                            tldCandidate
+                    );
                 }
-
-                CandidateDomain tldCandidate = new CandidateDomain(
-                    candidate.getBrandid(),
-                    candidate.getConfidence(),
-                    candidateDomain,
-                    candidate.getEditDistance(),
-                    candidate.getFirstSeen(),
-                    null,
-                    Instant.now(),
-                    candidate.getMutationType(),
-                    candidate.getSourceDomain(),
-                    candidate.getStatus()
-                    
-                );
-
-                uniqueCandidates.putIfAbsent(
-                    candidateDomain.toLowerCase(),
-                    tldCandidate
-                );
             }
         }
+
+        List<CandidateDomain> result =
+                new ArrayList<>(uniqueCandidates.values());
+
+        for (CandidateDomain candidate : result) {
+            candidateRepository.save(candidate);
+        }
+
+        return result;
     }
 
-    List<CandidateDomain> result =
-        new ArrayList<>(uniqueCandidates.values());
-
-    for (CandidateDomain candidate : result) {
-        candidateRepository.save(candidate);
+    @Override
+    public List<CandidateDomain> getCandidatesForBrand(UUID brandId) {
+        return candidateRepository.findByBrandId(brandId);
     }
 
-    return result;
-}
+    private String extractLabel(String domain) {
+        if (domain == null || domain.isBlank()) {
+            return null;
+        }
 
-@Override
-public List<CandidateDomain> getCandidatesForBrand(UUID brandId) {
-    return candidateRepository.findByBrandId(brandId);
-}
+        int dot = domain.indexOf('.');
 
-private String extractLabel(String domain) {
-    if (domain == null || domain.isBlank()) {
-        return null;
+        if (dot <= 0) {
+            return null;
+        }
+
+        return domain.substring(0, dot);
     }
 
-    int dot = domain.indexOf('.');
+    private String normalizeTld(String tld) {
+        if (tld == null) {
+            return "";
+        }
 
-    if (dot <= 0) {
-        return null;
+        String normalized = tld.trim().toLowerCase();
+
+        while (normalized.startsWith(".")) {
+            normalized = normalized.substring(1);
+        }
+
+        return normalized;
     }
-
-    return domain.substring(0, dot);
-}
-
-private String normalizeTld(String tld) {
-    if (tld == null) {
-        return "";
-    }
-
-    String normalized = tld.trim().toLowerCase();
-
-    while (normalized.startsWith(".")) {
-        normalized = normalized.substring(1);
-    }
-
-    return normalized;
-}
 }

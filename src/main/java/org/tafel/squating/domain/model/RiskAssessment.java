@@ -16,7 +16,11 @@ public class RiskAssessment {
     private Instant assessedAt;
     private List<String> triggeredRuleDescriptions;
 
-    public RiskAssessment(Instant assessedAt, UUID candidateid, UUID id, RiskLevel riskLevel, int totalScore, List<String> triggeredRuleDescriptions) {
+    public RiskAssessment(UUID id,
+                          UUID candidateId,
+                          int totalScore,
+                          RiskLevel riskLevel,
+                          List<String> triggeredRuleDescriptions) {
         
         if (candidateId == null){
             throw new IllegalArgumentException("candidateid must not be null");
@@ -25,7 +29,7 @@ public class RiskAssessment {
             throw new IllegalArgumentException("riskLevel must not be null");
         }
         this.assessedAt = Instant.now();
-        this.candidateId = candidateid;
+        this.candidateId = candidateId;
         this.id = id != null ? id : UUID.randomUUID();
         this.riskLevel = riskLevel;
         this.totalScore = Math.min(100, Math.max(0, totalScore));
@@ -55,5 +59,4 @@ public class RiskAssessment {
     public List<String> getTriggeredRuleDescriptions() {
         return triggeredRuleDescriptions;
     }
-
 }

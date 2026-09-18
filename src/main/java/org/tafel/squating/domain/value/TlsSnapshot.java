@@ -12,6 +12,6 @@ public record  TlsSnapshot(
     String certificateFingerprint
 ) {
     public TlsSnapshot{
-        subjectAlternativeNames = List.copyOf(subjectAlternativeNames);
+        subjectAlternativeNames = subjectAlternativeNames != null ? List.copyOf(subjectAlternativeNames) : List.of();
     }
 }
