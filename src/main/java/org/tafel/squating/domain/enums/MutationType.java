@@ -6,6 +6,5 @@ public enum MutationType{
         TRANSPOSITION,
         SUBSTITUTION,
         UMLAUT,
-        HOMOGLYPH,
         QWERTZ
     }
