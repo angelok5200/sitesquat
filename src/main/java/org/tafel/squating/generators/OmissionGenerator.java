@@ -47,7 +47,7 @@ public class OmissionGenerator implements CandidateGenerator {
             result.add(new CandidateDomain(
                     brand.getId(),
                     candidateDomain,
-                    null,
+                    sourceDomain,
                     MutationType.OMISSION,
                      1,
                     1.0,

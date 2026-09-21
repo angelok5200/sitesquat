@@ -54,8 +54,8 @@ public class UmlautGenerator implements CandidateGenerator {
             result.add(new CandidateDomain(
                     brand.getId(),
                     candidateDomain,
-                    null,
-                    MutationType.OMISSION,
+                    sourceDomain,
+                    MutationType.UMLAUT,
                      1,
                     1.0,
                     CandidateStatus.GENERATED,
