@@ -4,17 +4,11 @@ import java.util.List;
 import java.util.Optional;
 import java.util.UUID;
 
-import org.tafel.squating.domain.enums.EvidenceType;
 import org.tafel.squating.domain.model.Evidence;
 
 public interface EvidenceRepository {
     Optional<Evidence> findById(UUID id);
-    List<Evidence> findByObservationId(UUID observationid);
-
-    Optional<Evidence> findByObservationIdAndType (
-        UUID observationid,
-        EvidenceType type
-    );
+    List<Evidence> findByCandidateId(UUID candidateid);
     
-    void save (Evidence evidence);
+    Evidence save (Evidence evidence);
 }

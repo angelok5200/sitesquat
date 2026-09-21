@@ -8,6 +8,7 @@ import org.tafel.squating.domain.model.Alert;
 
 public interface AlertRepository {
     Optional<Alert> findById(UUID id);
+    Optional<Alert> findLatestByCandidateId(UUID candidateId);
     List<Alert> findByCandidateId(UUID candidateId);
-    void save(Alert alert);
+    Alert save(Alert alert);
 }

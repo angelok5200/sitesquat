@@ -10,5 +10,5 @@ public interface RiskAssessmentRepository {
     Optional<RiskAssessment> findById(UUID id);
     Optional<RiskAssessment> findLatestByCandidateId(UUID candidateId);
     List<RiskAssessment> findByCandidateId(UUID candidateId);
-    void save(RiskAssessment assessment);
+    RiskAssessment save(RiskAssessment assessment);
 }
