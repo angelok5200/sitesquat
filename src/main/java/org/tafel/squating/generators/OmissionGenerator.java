@@ -1,14 +1,14 @@
 package org.tafel.squating.generators;
 
+import java.time.Instant;
+import java.util.ArrayList;
+import java.util.List;
+
 import org.springframework.stereotype.Component;
 import org.tafel.squating.domain.enums.CandidateStatus;
 import org.tafel.squating.domain.enums.MutationType;
 import org.tafel.squating.domain.model.Brand;
 import org.tafel.squating.domain.model.CandidateDomain;
-
-import java.time.Instant;
-import java.util.ArrayList;
-import java.util.List;
 
 @Component
 public class OmissionGenerator implements CandidateGenerator {
@@ -22,7 +22,7 @@ public class OmissionGenerator implements CandidateGenerator {
             return result;
         }
 
-        String sourceDomain = brand.getPrimaryDomain();
+        String sourceDomain = brand.getPrimaryDomain().toLowerCase();
         int dot = sourceDomain.indexOf('.');
 
         if (dot <= 0) {
@@ -40,6 +40,7 @@ public class OmissionGenerator implements CandidateGenerator {
             String mutatedName =
                     name.substring(0, i) + name.substring(i + 1);
 
+            if (mutatedName.isBlank()) continue;
             String candidateDomain = mutatedName + tld;
             Instant now = Instant.now();
 
@@ -47,8 +48,12 @@ public class OmissionGenerator implements CandidateGenerator {
                     brand.getId(),
                     candidateDomain,
                     null,
-                    MutationType.OMISSION, 1, 1.0,
-                    CandidateStatus.GENERATED, now, now
+                    MutationType.OMISSION,
+                     1,
+                    1.0,
+                    CandidateStatus.GENERATED,
+                    now,
+                    now
             ));
         }
 

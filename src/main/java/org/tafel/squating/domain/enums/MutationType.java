@@ -4,7 +4,6 @@ public enum MutationType{
         OMISSION,
         DUPLICATION,
         TRANSPOSITION,
-        KEYBOARD,
         SUBSTITUTION,
         UMLAUT,
         HOMOGLYPH,

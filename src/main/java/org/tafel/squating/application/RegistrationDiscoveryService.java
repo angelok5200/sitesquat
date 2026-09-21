@@ -17,7 +17,4 @@ public class RegistrationDiscoveryService {
     
         return registrationLookup.lookupRegistration(candidate.getDomain());
     }
-
-
-
 }

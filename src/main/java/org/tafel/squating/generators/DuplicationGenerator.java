@@ -17,7 +17,7 @@ public class DuplicationGenerator implements CandidateGenerator  {
         List<CandidateDomain> result = new ArrayList<>();
 
         if (brand == null || brand.getPrimaryDomain() == null || brand.getPrimaryDomain().isBlank()) return result;
-        String domain = brand.getPrimaryDomain();
+        String domain = brand.getPrimaryDomain().toLowerCase();
         int dot = domain.indexOf('.');
         if (dot <= 0) return result;
 
@@ -26,16 +26,20 @@ public class DuplicationGenerator implements CandidateGenerator  {
 
         for (int i = 0; i < name.length(); i++) {
             char c = name.charAt(i);
-            if (c == '-' || c == '.') continue;
+            if (!Character.isLetterOrDigit(c)) continue;
             String mutated = name.substring(0, i) + c + name.substring(i);
             String candidateDomain = mutated + tld;
             Instant now = Instant.now();
             result.add(new CandidateDomain(
                 brand.getId(),
                 candidateDomain,
-                null,
-                MutationType.DUPLICATION, 1, 1.0,
-                CandidateStatus.GENERATED, now, now
+                domain,
+                MutationType.DUPLICATION, 
+                1, 
+                1.0,
+                CandidateStatus.GENERATED, 
+                now, 
+                now
             ));
         }
 

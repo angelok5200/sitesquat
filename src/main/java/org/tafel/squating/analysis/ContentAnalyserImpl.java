@@ -6,6 +6,8 @@ import java.util.Set;
 import java.util.regex.Pattern;
 
 import org.springframework.stereotype.Component;
+import org.tafel.squating.domain.enums.ContentIndicator;
+import org.tafel.squating.ports.outbound.ContentAnalyser;
 
 @Component
 public class ContentAnalyserImpl implements ContentAnalyser {

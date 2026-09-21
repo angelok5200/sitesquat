@@ -55,27 +55,35 @@ public class QwertzGenerator implements CandidateGenerator {
         if (brand == null || brand.getPrimaryDomain() == null || brand.getPrimaryDomain().isBlank()) return result;
 
 
-        String domain = brand.getPrimaryDomain();
+        String domain = brand.getPrimaryDomain().toLowerCase();
         int dot = domain.indexOf('.');
         if (dot <= 0) return result;
 
-        String name = domain.substring(0, dot).toLowerCase();
+        String name = domain.substring(0, dot);
         String tld = domain.substring(dot);
 
         for (int i = 0; i < name.length(); i++) {
             char original = name.charAt(i);
             List<Character> neighbors = NEIGHBORS.get(original);
-            if (neighbors != null) continue;
-                for (char neighbor : neighbors) {
+            
+            if (neighbors == null) {continue;}
+                
+            for (char neighbor : neighbors) {
+
+                if(neighbor == original) continue;
                     String mutated = name.substring(0, i) + neighbor + name.substring(i + 1);
                     String candidateDomain = mutated + tld;
                     Instant now = Instant.now();
                     result.add(new CandidateDomain(
                         brand.getId(),
                         candidateDomain,
-                        null,
-                        MutationType.QWERTZ, 1, 1.0,
-                        CandidateStatus.GENERATED, now, now
+                        domain,
+                        MutationType.QWERTZ, 
+                        1, 
+                        1.0,
+                        CandidateStatus.GENERATED, 
+                        now, 
+                        now
                     ));
             }
         }

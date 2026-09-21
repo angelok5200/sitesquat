@@ -5,19 +5,19 @@ import java.util.UUID;
 import org.tafel.squating.domain.enums.EvidenceType;
 
 public class Evidence {
-    private UUID id;
-    private EvidenceType type;
-    private UUID observationid;
+    private final UUID id;
+    //private final EvidenceType evidenceType;
+    private final UUID observationid;
 
-    private String location;
-    private String hash;
+    private final String location;
+    private final String hash;
 
-    private Instant createdAt;
+    private final Instant createdAt;
 
-    public Evidence(EvidenceType Type, Instant createdAt, String hash, UUID id, String location, UUID observationid) {
-        if (type == null) {
-            throw new IllegalArgumentException("type cannot be null");
-        }
+    public Evidence(EvidenceType evidenceType, Instant createdAt, String hash, UUID id, String location, UUID observationid) {
+        //if (evidenceType == null) {
+       //     throw new IllegalArgumentException("type cannot be null");
+        //}
         if (location == null || location.isBlank()) {
             throw new IllegalArgumentException("location cannot be null or empty");
         }
@@ -27,10 +27,13 @@ public class Evidence {
         if (hash == null || hash.isBlank()) {
             throw new IllegalArgumentException("name cannot be null or empty");
         }
-        this.type = type;
+        if (observationid == null) {
+            throw new IllegalArgumentException("observationid cannot be null");
+        }
+        //this.evidenceType = evidenceType;
         this.createdAt = createdAt;
         this.hash = hash;
-        this.id = id;
+        this.id = id != null ? id : UUID.randomUUID();
         this.location = location;
         this.observationid = observationid;
     }
@@ -39,9 +42,9 @@ public class Evidence {
         return id;
     }
 
-    public EvidenceType getType() {
-        return type;
-    }
+    //public EvidenceType getEvidenceType() {
+   //     return evidenceType;
+    //}
 
     public UUID getObservationid() {
         return observationid;

@@ -9,5 +9,5 @@ import org.tafel.squating.domain.model.Brand;
 public interface BrandRepository {
     Optional<Brand> findById(UUID Id);
     List<Brand> findAll();
-    void save(Brand brand);
+    Brand save(Brand brand);
 }

@@ -8,10 +8,12 @@ import java.util.Locale;
 import java.util.Set;
 
 import org.springframework.stereotype.Component;
+import org.tafel.squating.ports.outbound.SimilarityAnalyzer;
 
 @Component
-public class SimilarityAnalyserImpl {
+public class SimilarityAnalyserImpl implements SimilarityAnalyzer {
 
+    @Override
     public SimilarityResult analyze(
             String candidateText,
             String referenceText,

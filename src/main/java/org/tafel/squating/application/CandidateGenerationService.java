@@ -35,9 +35,19 @@ public class CandidateGenerationService implements ScanCandidatesUseCase {
 
     @Override
     public List<CandidateDomain> generateCandidates(UUID brandId) {
+        if (brandId == null) {
+            throw new IllegalArgumentException("brandId must not be null");
+        }
+
         Brand brand = brandRepository.findById(brandId)
                 .orElseThrow(() ->
                         new IllegalArgumentException("Brand not found: " + brandId));
+
+        if (brand.getMonitoringPolicy() == null) {
+            throw new IllegalStateException(
+                    "Monitoring policy is not configured for brand: " + brandId
+            );
+        }
 
         Set<String> monitoredTlds =
                 brand.getMonitoringPolicy().monitoredTlds();
@@ -52,7 +62,15 @@ public class CandidateGenerationService implements ScanCandidatesUseCase {
         for (CandidateGenerator generator : generators) {
             List<CandidateDomain> generated = generator.generate(brand);
 
+            if (generated == null || generated.isEmpty()) {
+                continue;
+            }
+
             for (CandidateDomain candidate : generated) {
+                if (candidate == null) {
+                    continue;
+                }
+
                 String candidateLabel =
                         extractLabel(candidate.getDomain());
 
@@ -75,6 +93,13 @@ public class CandidateGenerationService implements ScanCandidatesUseCase {
                         continue;
                     }
 
+                    String deduplicationKey =
+                            candidateDomain.toLowerCase();
+
+                    if (uniqueCandidates.containsKey(deduplicationKey)) {
+                        continue;
+                    }
+
                     CandidateDomain tldCandidate =
                             new CandidateDomain(
                                     candidate.getBrandId(),
@@ -88,8 +113,8 @@ public class CandidateGenerationService implements ScanCandidatesUseCase {
                                     Instant.now()
                             );
 
-                    uniqueCandidates.putIfAbsent(
-                            candidateDomain.toLowerCase(),
+                    uniqueCandidates.put(
+                            deduplicationKey,
                             tldCandidate
                     );
                 }
@@ -108,6 +133,10 @@ public class CandidateGenerationService implements ScanCandidatesUseCase {
 
     @Override
     public List<CandidateDomain> getCandidatesForBrand(UUID brandId) {
+        if (brandId == null) {
+            throw new IllegalArgumentException("brandId must not be null");
+        }
+
         return candidateRepository.findByBrandId(brandId);
     }
 
@@ -116,13 +145,16 @@ public class CandidateGenerationService implements ScanCandidatesUseCase {
             return null;
         }
 
-        int dot = domain.indexOf('.');
+        String normalizedDomain =
+                domain.trim().toLowerCase();
+
+        int dot = normalizedDomain.indexOf('.');
 
         if (dot <= 0) {
             return null;
         }
 
-        return domain.substring(0, dot);
+        return normalizedDomain.substring(0, dot);
     }
 
     private String normalizeTld(String tld) {
@@ -130,7 +162,8 @@ public class CandidateGenerationService implements ScanCandidatesUseCase {
             return "";
         }
 
-        String normalized = tld.trim().toLowerCase();
+        String normalized =
+                tld.trim().toLowerCase();
 
         while (normalized.startsWith(".")) {
             normalized = normalized.substring(1);

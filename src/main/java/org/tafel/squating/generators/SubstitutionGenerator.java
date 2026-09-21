@@ -20,7 +20,7 @@ public List<CandidateDomain> generate(Brand brand) {
     if (brand == null || brand.getPrimaryDomain() == null || brand.getPrimaryDomain().isBlank()) return result;
 
 
-    String domain = brand.getPrimaryDomain();
+    String domain = brand.getPrimaryDomain().toLowerCase();
     int dot = domain.indexOf('.');
 
     if (dot <= 0) {
@@ -53,9 +53,13 @@ public List<CandidateDomain> generate(Brand brand) {
             result.add(new CandidateDomain(
                 brand.getId(),
                 candidateDomain,
-                null,
-                MutationType.SUBSTITUTION, 1, 1.0,
-                CandidateStatus.GENERATED, now, now
+                domain,
+                MutationType.SUBSTITUTION, 
+                1, 
+                1.0,
+                CandidateStatus.GENERATED, 
+                now, 
+                now
             ));
         }
     }
@@ -70,11 +74,11 @@ private char[] replacementsFor(char character) {
         return new char[]{previous, next};
     }
 
-    if (character >= 'A' && character <= 'Z') {
+    /*if (character >= 'A' && character <= 'Z') {
         char previous = character == 'A' ? 'Z' : (char) (character - 1);
         char next = character == 'Z' ? 'A' : (char) (character + 1);
         return new char[]{previous, next};
-    }
+    }*/
 
     if (character >= '0' && character <= '9') {
         char previous = character == '0' ? '9' : (char) (character - 1);
@@ -85,8 +89,8 @@ private char[] replacementsFor(char character) {
     return new char[0];
 }
 
-@Override
-public MutationType getMutationType() {
-    return MutationType.SUBSTITUTION;
-}
+    @Override
+    public MutationType getMutationType() {
+        return MutationType.SUBSTITUTION;
+    }
 }

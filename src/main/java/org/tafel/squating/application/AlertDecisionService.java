@@ -4,22 +4,27 @@ import org.springframework.stereotype.Service;
 import org.tafel.squating.domain.enums.AlertType;
 import org.tafel.squating.domain.enums.RiskLevel;
 import org.tafel.squating.domain.model.Alert;
+import org.tafel.squating.domain.model.CandidateDomain;
 import org.tafel.squating.domain.model.DomainObservation;
 import org.tafel.squating.domain.model.RiskAssessment;
-
-import java.time.Instant;
-import java.util.UUID;
 
 @Service
 public class AlertDecisionService {
 
     public Alert decide(
+            CandidateDomain candidate,
             DomainObservation previousObservation,
             DomainObservation currentObservation,
             RiskAssessment previousAssessment,
             RiskAssessment currentAssessment,
-            boolean loginFormDetected
+            boolean previousLoginFormDetected,
+            boolean currentLoginFormDetected
     ) {
+        if (candidate == null) {
+            throw new IllegalArgumentException(
+                    "candidate must not be null"
+            );
+        }
         if (currentObservation == null) {
             throw new IllegalArgumentException(
                     "currentObservation must not be null"
@@ -32,11 +37,15 @@ public class AlertDecisionService {
             );
         }
 
-        UUID candidateId = currentObservation.getCandidateId();
-
-        if (candidateId == null) {
+        if (!candidate.getId().equals(currentObservation.getCandidateId())) {
             throw new IllegalArgumentException(
-                    "candidateId must not be null"
+                    "Candidates Id does not match observation"
+            );
+        }
+
+        if (!candidate.getId().equals(currentAssessment.getCandidateId())) {
+            throw new IllegalArgumentException(
+                    "Candidates Id does not match assessment"
             );
         }
 
@@ -45,7 +54,8 @@ public class AlertDecisionService {
                 currentObservation,
                 previousAssessment,
                 currentAssessment,
-                loginFormDetected
+                previousLoginFormDetected,
+                currentLoginFormDetected
         );
 
         if (alertType == null) {
@@ -54,19 +64,17 @@ public class AlertDecisionService {
 
         return new Alert(
                 null,
-                candidateId,
-                currentObservation.getId(),
-                currentAssessment.getId(),
+                candidate.getBrandId(),
+                candidate.getId(),
+                candidate.getDomain(),
                 alertType,
+                currentAssessment.getRiskLevel(),
                 buildTitle(alertType),
                 buildMessage(
                         alertType,
-                        currentObservation,
+                        candidate,
                         currentAssessment
-                ),
-                Instant.now(),
-                null,
-                null
+                )
         );
     }
 
@@ -75,7 +83,8 @@ public class AlertDecisionService {
             DomainObservation currentObservation,
             RiskAssessment previousAssessment,
             RiskAssessment currentAssessment,
-            boolean loginFormDetected
+            boolean previousLoginFormDetected,
+            boolean currentLoginFormDetected
     ) {
         /*
          * First discovery has the highest priority.
@@ -120,7 +129,7 @@ public class AlertDecisionService {
          * The observation model does not store content indicators,
          * therefore this signal is supplied by Content Analysis.
          */
-        if (loginFormDetected) {
+        if (!previousLoginFormDetected && currentLoginFormDetected) {
             return AlertType.LOGIN_FORM_APPEARED;
         }
 
@@ -168,8 +177,7 @@ public class AlertDecisionService {
             return false;
         }
 
-        if (previousObservation == null
-                || previousObservation.getMail() == null) {
+        if (previousObservation.getMail() == null) {
             return true;
         }
 
@@ -180,15 +188,22 @@ public class AlertDecisionService {
             DomainObservation previousObservation,
             DomainObservation currentObservation
     ) {
-        boolean currentHasCertificate =
-                currentObservation.getTls() != null;
 
-        if (!currentHasCertificate) {
+        if (currentObservation.getTls() == null) {
             return false;
         }
 
-        return previousObservation == null
-                || previousObservation.getTls() == null;
+        if (previousObservation.getTls() == null) {
+            return true;
+        }
+
+        String previousFingerprint = previousObservation.getTls().certificateFingerprint();
+        String currentFingerprint = currentObservation.getTls().certificateFingerprint();
+
+        if (previousFingerprint == null || previousFingerprint.isBlank()) return currentFingerprint != null && !currentFingerprint.isBlank();
+        if (currentFingerprint == null || currentFingerprint.isBlank()) return false;
+
+                return !previousFingerprint.equals(currentFingerprint);
     }
 
     private boolean contentChanged(
@@ -232,13 +247,13 @@ public class AlertDecisionService {
 
     private String buildMessage(
             AlertType alertType,
-            DomainObservation observation,
+            CandidateDomain candidate,
             RiskAssessment assessment
     ) {
         return String.format(
                 "Alert type: %s. Candidate: %s. Risk level: %s. Score: %d.",
                 alertType,
-                observation.getCandidateId(),
+                candidate.getDomain(),
                 assessment.getRiskLevel(),
                 assessment.getTotalScore()
         );

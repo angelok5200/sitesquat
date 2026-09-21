@@ -2,6 +2,8 @@ package org.tafel.squating.analysis;
 
 import java.util.Set;
 
+import org.tafel.squating.domain.enums.ContentIndicator;
+
 public record ContentAnalysis (
      boolean brandMentioned,
      boolean loginFormDetected,

@@ -9,7 +9,7 @@ import org.tafel.squating.domain.value.MonitoringPolicy;
 
 public interface MonitorDomainUseCase {
     
-    Brand registeBrand(
+    Brand registerBrand(
         String name,
         String primaryDomain,
         MonitoringPolicy monitoringPolicy,

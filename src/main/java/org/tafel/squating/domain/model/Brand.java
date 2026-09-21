@@ -7,13 +7,13 @@ import java.util.UUID;
 import org.tafel.squating.domain.value.MonitoringPolicy;
 
 public class Brand {
-    private UUID id;
-    private String name;
-    private String primaryDomain;
-    private String referenceUrl;
+    private final UUID id;
+    private final String name;
+    private final String primaryDomain;
+    private final String referenceUrl;
 
-    private Set<String> monitoredIds;
-    private MonitoringPolicy monitoringPolicy;
+    private final Set<String> monitoredIds;
+    private final MonitoringPolicy monitoringPolicy;
 
     private Instant createdAt;
 
@@ -24,9 +24,15 @@ public class Brand {
         if (name == null || name.isEmpty()) {
             throw new IllegalArgumentException("name cannot be null or empty");
         }
-        this.createdAt = createdAt;
+        if (monitoringPolicy == null) {
+            throw new IllegalArgumentException("monitoringPolicy cannot be null");
+        }
+        if (primaryDomain == null || primaryDomain.isBlank()) {
+            throw new IllegalArgumentException("primaryDomain cannot be null or empty");
+        }
+        this.createdAt = createdAt != null ? createdAt : Instant.now();
         this.id = id;
-        this.monitoredIds = monitoredIds;
+        this.monitoredIds = monitoredIds != null ? Set.copyOf(monitoredIds) : Set.of();
         this.monitoringPolicy = monitoringPolicy;
         this.name = name;
         this.primaryDomain = primaryDomain;

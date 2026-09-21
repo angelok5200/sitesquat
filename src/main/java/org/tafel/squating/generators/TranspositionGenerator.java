@@ -13,7 +13,8 @@ import org.tafel.squating.domain.model.CandidateDomain;
 @Component
 public class TranspositionGenerator implements CandidateGenerator  {
     
-public List<CandidateDomain> generate(Brand brand) {
+    @Override 
+    public List<CandidateDomain> generate(Brand brand) {
         List<CandidateDomain> result = new ArrayList<>();
                 
         if (brand == null || brand.getPrimaryDomain() == null || brand.getPrimaryDomain().isBlank()) return result;
@@ -43,15 +44,17 @@ public List<CandidateDomain> generate(Brand brand) {
             result.add(new CandidateDomain(
                 brand.getId(),
                 candidateName,
-                null,
-                MutationType.TRANSPOSITION, 1, 1.0,
-                CandidateStatus.GENERATED, now, now
+                domain,
+                MutationType.TRANSPOSITION, 
+                1, 
+                1.0,
+                CandidateStatus.GENERATED, 
+                now, 
+                now
             ));
         }
-
         return result;
     }
-
 
     @Override
     public MutationType getMutationType() {
