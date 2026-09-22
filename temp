@@ -1,4 +1,4 @@
-Я не буду трогать AlertDecisionService, scoring или Similarity — здесь меняем только цепочку отправки email.
+И главное: Similarity сюда не возвращаем.
 
 1. ApplicationProperties.java
 ApplicationProperties.java
@@ -37,22 +37,11 @@ public class ApplicationProperties {
         this.mailRecipient = mailRecipient;
     }
 }
-2. AlertSender.java
+2. EmailAlertSender.java
 
-Оставляем существующий контракт без изменений:
+Создай в:
 
-AlertSender.java
-package org.tafel.squating.ports.outbound;
-
-import org.tafel.squating.domain.model.Alert;
-
-public interface AlertSender {
-
-    void send(Alert alert);
-}
-3. EmailAlertSender.java
-
-Новый adapter, который непосредственно отправляет письмо через Spring Mail:
+src/main/java/org/tafel/squating/notification/EmailAlertSender.java
 
 EmailAlertSender.java
 package org.tafel.squating.notification;
@@ -120,77 +109,11 @@ public class EmailAlertSender implements AlertSender {
         );
     }
 }
-4. MonitoringService.java
+3. application.properties
 
-Здесь важно, что теперь AlertDecisionService возвращает список, поэтому отправляем каждый Alert отдельно.
+Если файла ещё нет — создай src/main/resources/application.properties.
 
-MonitoringService.java
-package org.tafel.squating.application;
-
-import java.util.List;
-
-import org.springframework.stereotype.Service;
-import org.tafel.squating.domain.model.Alert;
-import org.tafel.squating.domain.model.CandidateDomain;
-import org.tafel.squating.domain.model.DomainObservation;
-import org.tafel.squating.domain.model.RiskAssessment;
-import org.tafel.squating.analysis.ContentAnalysis;
-import org.tafel.squating.ports.outbound.AlertSender;
-import org.tafel.squating.ports.outbound.AlertRepository;
-
-@Service
-public class MonitoringService {
-
-    private final AlertDecisionService alertDecisionService;
-    private final AlertSender alertSender;
-    private final AlertRepository alertRepository;
-
-    public MonitoringService(
-            AlertDecisionService alertDecisionService,
-            AlertSender alertSender,
-            AlertRepository alertRepository
-    ) {
-        this.alertDecisionService = alertDecisionService;
-        this.alertSender = alertSender;
-        this.alertRepository = alertRepository;
-    }
-
-    public List<Alert> monitor(
-            CandidateDomain candidate,
-            DomainObservation currentObservation,
-            DomainObservation previousObservation,
-            RiskAssessment currentAssessment,
-            RiskAssessment previousAssessment,
-            ContentAnalysis contentAnalysis
-    ) {
-        List<Alert> alerts = alertDecisionService.decide(
-                candidate,
-                currentObservation,
-                previousObservation,
-                currentAssessment,
-                previousAssessment,
-                contentAnalysis
-        );
-
-        if (alerts.isEmpty()) {
-            return List.of();
-        }
-
-        List<Alert> savedAlerts = alerts.stream()
-                .map(alertRepository::save)
-                .toList();
-
-        savedAlerts.forEach(alertSender::send);
-
-        return savedAlerts;
-    }
-}
-
-Важно: я здесь использовал сигнатуру monitor(...) с ContentAnalysis, потому что именно через неё у нас идут события вроде LOGIN_FORM_APPEARED и CONTENT_CHANGED. Если твой текущий MonitoringService имеет другую сигнатуру, сначала покажи его текущий код — я подгоню этот файл под реальные методы, не выдумывая API.
-
-5. application.properties
-
-Получатель — твой placeholder empfaenger:
+Получатель ставишь сама:
 
 application.properties
 app.mail-recipient=empfaenger
@@ -203,16 +126,46 @@ spring.mail.password=${MAIL_PASSWORD}
 spring.mail.properties.mail.smtp.auth=true
 spring.mail.properties.mail.smtp.starttls.enable=true
 
-Пароль при этом не хранится в проекте:
+empfaenger потом просто заменишь на настоящий адрес.
 
-MAIL_PASSWORD=...
-6. pom.xml
+YOUR_SMTP_HOST и YOUR_SMTP_USERNAME тоже заменяются на данные твоего почтового сервера.
 
-Добавить зависимость:
+4. pom.xml
 
-pom.xml dependency
+В существующий <dependencies> добавь только эту зависимость:
+
+spring-boot-starter-mail dependency
 <dependency>
     <groupId>org.springframework.boot</groupId>
     <artifactId>spring-boot-starter-mail</artifactId>
 </dependency>
-Что в итоге происходит
+
+То есть начало dependencies после добавления будет:
+
+pom.xml dependencies
+<dependencies>
+
+    <dependency>
+        <groupId>org.springframework.boot</groupId>
+        <artifactId>spring-boot-starter</artifactId>
+    </dependency>
+
+    <dependency>
+        <groupId>org.springframework.boot</groupId>
+        <artifactId>spring-boot-starter-mail</artifactId>
+    </dependency>
+
+    <dependency>
+        <groupId>com.fasterxml.jackson.core</groupId>
+        <artifactId>jackson-databind</artifactId>
+        <version>2.19.2</version>
+    </dependency>
+
+    <dependency>
+        <groupId>dnsjava</groupId>
+        <artifactId>dnsjava</artifactId>
+        <version>3.6.3</version>
+    </dependency>
+
+</dependencies>
+Что больше менять не нужно
