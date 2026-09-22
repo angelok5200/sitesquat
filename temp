@@ -1,559 +1,218 @@
-Здесь полностью убираем determineAlertType(). Вместо него собираем список.
+Я не буду трогать AlertDecisionService, scoring или Similarity — здесь меняем только цепочку отправки email.
 
-AlertDecisionService.java
-package org.tafel.squating.application;
+1. ApplicationProperties.java
+ApplicationProperties.java
+package org.tafel.squating.config;
 
-import java.util.ArrayList;
-import java.util.List;
+import org.springframework.boot.context.properties.ConfigurationProperties;
 
-import org.springframework.stereotype.Service;
-import org.tafel.squating.domain.enums.AlertType;
-import org.tafel.squating.domain.enums.ContentIndicator;
-import org.tafel.squating.domain.enums.RiskLevel;
+@ConfigurationProperties(prefix = "app")
+public class ApplicationProperties {
+
+    private String baseUrl;
+    private String evidenceDirectory;
+    private String mailRecipient;
+
+    public String getBaseUrl() {
+        return baseUrl;
+    }
+
+    public void setBaseUrl(String baseUrl) {
+        this.baseUrl = baseUrl;
+    }
+
+    public String getEvidenceDirectory() {
+        return evidenceDirectory;
+    }
+
+    public void setEvidenceDirectory(String evidenceDirectory) {
+        this.evidenceDirectory = evidenceDirectory;
+    }
+
+    public String getMailRecipient() {
+        return mailRecipient;
+    }
+
+    public void setMailRecipient(String mailRecipient) {
+        this.mailRecipient = mailRecipient;
+    }
+}
+2. AlertSender.java
+
+Оставляем существующий контракт без изменений:
+
+AlertSender.java
+package org.tafel.squating.ports.outbound;
+
 import org.tafel.squating.domain.model.Alert;
-import org.tafel.squating.domain.model.CandidateDomain;
-import org.tafel.squating.domain.model.DomainObservation;
-import org.tafel.squating.domain.model.RiskAssessment;
 
-@Service
-public class AlertDecisionService {
+public interface AlertSender {
 
-    public List<Alert> decide(
-            CandidateDomain candidate,
-            DomainObservation previousObservation,
-            DomainObservation currentObservation,
-            RiskAssessment previousAssessment,
-            RiskAssessment currentAssessment
+    void send(Alert alert);
+}
+3. EmailAlertSender.java
+
+Новый adapter, который непосредственно отправляет письмо через Spring Mail:
+
+EmailAlertSender.java
+package org.tafel.squating.notification;
+
+import org.springframework.mail.SimpleMailMessage;
+import org.springframework.mail.javamail.JavaMailSender;
+import org.springframework.stereotype.Component;
+import org.tafel.squating.config.ApplicationProperties;
+import org.tafel.squating.domain.model.Alert;
+import org.tafel.squating.ports.outbound.AlertSender;
+
+@Component
+public class EmailAlertSender implements AlertSender {
+
+    private final JavaMailSender mailSender;
+    private final ApplicationProperties applicationProperties;
+
+    public EmailAlertSender(
+            JavaMailSender mailSender,
+            ApplicationProperties applicationProperties
     ) {
-        if (candidate == null) {
-            throw new IllegalArgumentException(
-                    "candidate must not be null"
-            );
-        }
-
-        if (currentObservation == null) {
-            throw new IllegalArgumentException(
-                    "currentObservation must not be null"
-            );
-        }
-
-        if (currentAssessment == null) {
-            throw new IllegalArgumentException(
-                    "currentAssessment must not be null"
-            );
-        }
-
-        if (!candidate.getId().equals(
-                currentObservation.getCandidateId())) {
-            throw new IllegalArgumentException(
-                    "Candidate id does not match observation"
-            );
-        }
-
-        if (!candidate.getId().equals(
-                currentAssessment.getCandidateId())) {
-            throw new IllegalArgumentException(
-                    "Candidate id does not match assessment"
-            );
-        }
-
-        List<Alert> alerts = new ArrayList<>();
-
-        if (previousObservation == null) {
-            alerts.add(createAlert(
-                    AlertType.NEW_CANDIDATE,
-                    candidate,
-                    currentAssessment
-            ));
-
-            return alerts;
-        }
-
-        if (isRiskEscalation(
-                previousAssessment,
-                currentAssessment
-        )) {
-            alerts.add(createAlert(
-                    AlertType.RISK_ESCALATION,
-                    candidate,
-                    currentAssessment
-            ));
-        }
-
-        if (mxAppeared(
-                previousObservation,
-                currentObservation
-        )) {
-            alerts.add(createAlert(
-                    AlertType.MX_APPEARED,
-                    candidate,
-                    currentAssessment
-            ));
-        }
-
-        if (certificateAppeared(
-                previousObservation,
-                currentObservation
-        )) {
-            alerts.add(createAlert(
-                    AlertType.CERTIFICATE_APPEARED,
-                    candidate,
-                    currentAssessment
-            ));
-        }
-
-        if (certificateReplaced(
-                previousObservation,
-                currentObservation
-        )) {
-            alerts.add(createAlert(
-                    AlertType.CERTIFICATE_REPLACED,
-                    candidate,
-                    currentAssessment
-            ));
-        }
-
-        if (loginFormAppeared(
-                previousObservation,
-                currentObservation
-        )) {
-            alerts.add(createAlert(
-                    AlertType.LOGIN_FORM_APPEARED,
-                    candidate,
-                    currentAssessment
-            ));
-        }
-
-        if (contentChanged(
-                previousObservation,
-                currentObservation
-        )) {
-            alerts.add(createAlert(
-                    AlertType.CONTENT_CHANGED,
-                    candidate,
-                    currentAssessment
-            ));
-        }
-
-        return alerts;
+        this.mailSender = mailSender;
+        this.applicationProperties = applicationProperties;
     }
 
-    private Alert createAlert(
-            AlertType alertType,
-            CandidateDomain candidate,
-            RiskAssessment assessment
-    ) {
-        return new Alert(
-                null,
-                candidate.getBrandId(),
-                candidate.getId(),
-                candidate.getDomain(),
-                alertType,
-                assessment.getRiskLevel(),
-                buildTitle(alertType),
-                buildMessage(
-                        alertType,
-                        candidate,
-                        assessment
-                )
+    @Override
+    public void send(Alert alert) {
+        if (alert == null) {
+            throw new IllegalArgumentException("alert must not be null");
+        }
+
+        String recipient = applicationProperties.getMailRecipient();
+
+        if (recipient == null || recipient.isBlank()) {
+            throw new IllegalStateException(
+                    "Mail recipient must be configured"
+            );
+        }
+
+        SimpleMailMessage message = new SimpleMailMessage();
+
+        message.setTo(recipient);
+        message.setSubject(
+                "[SiteSquating] " + alert.getHeadline()
         );
+        message.setText(buildMessage(alert));
+
+        mailSender.send(message);
     }
 
-    private boolean isRiskEscalation(
-            RiskAssessment previousAssessment,
-            RiskAssessment currentAssessment
-    ) {
-        if (previousAssessment == null
-                || previousAssessment.getRiskLevel() == null
-                || currentAssessment.getRiskLevel() == null) {
-            return false;
-        }
+    private String buildMessage(Alert alert) {
+        return """
+                SiteSquating alert
 
-        RiskLevel previousLevel =
-                previousAssessment.getRiskLevel();
+                Domain: %s
+                Type: %s
+                Severity: %s
 
-        RiskLevel currentLevel =
-                currentAssessment.getRiskLevel();
-
-        return (previousLevel == RiskLevel.MEDIUM
-                    && currentLevel == RiskLevel.HIGH)
-                || (previousLevel == RiskLevel.HIGH
-                    && currentLevel == RiskLevel.CRITICAL);
-    }
-
-    private boolean mxAppeared(
-            DomainObservation previousObservation,
-            DomainObservation currentObservation
-    ) {
-        if (currentObservation.getMail() == null
-                || !currentObservation.getMail().mxConfigured()) {
-            return false;
-        }
-
-        if (previousObservation.getMail() == null) {
-            return true;
-        }
-
-        return !previousObservation.getMail().mxConfigured();
-    }
-
-    private boolean certificateAppeared(
-            DomainObservation previousObservation,
-            DomainObservation currentObservation
-    ) {
-        String currentFingerprint =
-                getCertificateFingerprint(currentObservation);
-
-        if (currentFingerprint == null) {
-            return false;
-        }
-
-        String previousFingerprint =
-                getCertificateFingerprint(previousObservation);
-
-        return previousFingerprint == null;
-    }
-
-    private boolean certificateReplaced(
-            DomainObservation previousObservation,
-            DomainObservation currentObservation
-    ) {
-        String previousFingerprint =
-                getCertificateFingerprint(previousObservation);
-
-        String currentFingerprint =
-                getCertificateFingerprint(currentObservation);
-
-        if (previousFingerprint == null
-                || currentFingerprint == null) {
-            return false;
-        }
-
-        return !previousFingerprint.equals(currentFingerprint);
-    }
-
-    private String getCertificateFingerprint(
-            DomainObservation observation
-    ) {
-        if (observation == null
-                || observation.getTls() == null) {
-            return null;
-        }
-
-        String fingerprint =
-                observation.getTls().certificateFingerprint();
-
-        if (fingerprint == null || fingerprint.isBlank()) {
-            return null;
-        }
-
-        return fingerprint;
-    }
-
-    private boolean loginFormAppeared(
-            DomainObservation previousObservation,
-            DomainObservation currentObservation
-    ) {
-        boolean previousLogin =
-                previousObservation.getContentIndicators()
-                        .contains(ContentIndicator.LOGIN_FORM);
-
-        boolean currentLogin =
-                currentObservation.getContentIndicators()
-                        .contains(ContentIndicator.LOGIN_FORM);
-
-        return !previousLogin && currentLogin;
-    }
-
-    private boolean contentChanged(
-            DomainObservation previousObservation,
-            DomainObservation currentObservation
-    ) {
-        String previousHash =
-                previousObservation.getContentHash();
-
-        String currentHash =
-                currentObservation.getContentHash();
-
-        if (previousHash == null || currentHash == null) {
-            return false;
-        }
-
-        return !previousHash.equals(currentHash);
-    }
-
-    private String buildTitle(AlertType alertType) {
-        return switch (alertType) {
-            case NEW_CANDIDATE ->
-                    "New suspicious candidate detected";
-
-            case RISK_ESCALATION ->
-                    "Risk level escalated";
-
-            case CONTENT_CHANGED ->
-                    "Candidate content changed";
-
-            case MX_APPEARED ->
-                    "Mail configuration appeared";
-
-            case LOGIN_FORM_APPEARED ->
-                    "Login form detected";
-
-            case CERTIFICATE_APPEARED ->
-                    "TLS certificate appeared";
-
-            case CERTIFICATE_REPLACED ->
-                    "TLS certificate replaced";
-        };
-    }
-
-    private String buildMessage(
-            AlertType alertType,
-            CandidateDomain candidate,
-            RiskAssessment assessment
-    ) {
-        return String.format(
-                "Alert type: %s. Candidate: %s. Risk level: %s. Score: %d.",
-                alertType,
-                candidate.getDomain(),
-                assessment.getRiskLevel(),
-                assessment.getTotalScore()
+                %s
+                """.formatted(
+                alert.getDomain(),
+                alert.getType(),
+                alert.getSeverity(),
+                alert.getMessage()
         );
     }
 }
-Что теперь происходит
+4. MonitoringService.java
 
+Здесь важно, что теперь AlertDecisionService возвращает список, поэтому отправляем каждый Alert отдельно.
 
-
-Similarity здесь не возвращаем и не добавляем.
 MonitoringService.java
 package org.tafel.squating.application;
 
-import java.nio.charset.StandardCharsets;
-import java.security.MessageDigest;
-import java.security.NoSuchAlgorithmException;
 import java.util.List;
-import java.util.Set;
 
 import org.springframework.stereotype.Service;
-import org.tafel.squating.analysis.ContentAnalysis;
-import org.tafel.squating.domain.enums.ContentIndicator;
 import org.tafel.squating.domain.model.Alert;
-import org.tafel.squating.domain.model.Brand;
 import org.tafel.squating.domain.model.CandidateDomain;
 import org.tafel.squating.domain.model.DomainObservation;
 import org.tafel.squating.domain.model.RiskAssessment;
-import org.tafel.squating.domain.value.HttpSnapshot;
-import org.tafel.squating.domain.value.MonitoringPolicy;
+import org.tafel.squating.analysis.ContentAnalysis;
+import org.tafel.squating.ports.outbound.AlertSender;
 import org.tafel.squating.ports.outbound.AlertRepository;
-import org.tafel.squating.ports.outbound.BrandRepository;
-import org.tafel.squating.ports.outbound.ContentAnalyser;
-import org.tafel.squating.ports.outbound.ObservationRepository;
-import org.tafel.squating.ports.outbound.RiskAssessmentRepository;
 
 @Service
 public class MonitoringService {
 
-    private final DomainInspectionService domainInspectionService;
-    private final RiskAssessmentService riskAssessmentService;
     private final AlertDecisionService alertDecisionService;
-
-    private final BrandRepository brandRepository;
-    private final ContentAnalyser contentAnalyser;
-
-    private final ObservationRepository observationRepository;
-    private final RiskAssessmentRepository riskAssessmentRepository;
+    private final AlertSender alertSender;
     private final AlertRepository alertRepository;
 
     public MonitoringService(
-            DomainInspectionService domainInspectionService,
-            RiskAssessmentService riskAssessmentService,
             AlertDecisionService alertDecisionService,
-            BrandRepository brandRepository,
-            ContentAnalyser contentAnalyser,
-            ObservationRepository observationRepository,
-            RiskAssessmentRepository riskAssessmentRepository,
+            AlertSender alertSender,
             AlertRepository alertRepository
     ) {
-        this.domainInspectionService = domainInspectionService;
-        this.riskAssessmentService = riskAssessmentService;
         this.alertDecisionService = alertDecisionService;
-        this.brandRepository = brandRepository;
-        this.contentAnalyser = contentAnalyser;
-        this.observationRepository = observationRepository;
-        this.riskAssessmentRepository = riskAssessmentRepository;
+        this.alertSender = alertSender;
         this.alertRepository = alertRepository;
     }
 
     public List<Alert> monitor(
             CandidateDomain candidate,
-            MonitoringPolicy policy,
-            boolean recentRegistration
+            DomainObservation currentObservation,
+            DomainObservation previousObservation,
+            RiskAssessment currentAssessment,
+            RiskAssessment previousAssessment,
+            ContentAnalysis contentAnalysis
     ) {
-        if (candidate == null) {
-            throw new IllegalArgumentException(
-                    "candidate must not be null"
-            );
-        }
-
-        if (policy == null) {
-            throw new IllegalArgumentException(
-                    "policy must not be null"
-            );
-        }
-
-        Brand brand = brandRepository.findById(candidate.getBrandId())
-                .orElseThrow(() ->
-                        new IllegalArgumentException(
-                                "Brand not found: "
-                                        + candidate.getBrandId()
-                        )
-                );
-
-        DomainObservation previousObservation =
-                observationRepository
-                        .findLatestByCandidateId(candidate.getId())
-                        .orElse(null);
-
-        RiskAssessment previousAssessment =
-                riskAssessmentRepository
-                        .findLatestByCandidateId(candidate.getId())
-                        .orElse(null);
-
-        DomainObservation currentObservation =
-                domainInspectionService.inspect(
-                        candidate,
-                        policy
-                );
-
-        ContentAnalysis contentAnalysis =
-                analyseContent(
-                        brand,
-                        currentObservation,
-                        policy
-                );
-
-        DomainObservation enrichedObservation =
-                enrichObservation(
-                        currentObservation,
-                        contentAnalysis
-                );
-
-        RiskAssessment currentAssessment =
-                riskAssessmentService.assess(
-                        candidate,
-                        enrichedObservation,
-                        contentAnalysis,
-                        recentRegistration
-                );
-
-        observationRepository.save(enrichedObservation);
-        riskAssessmentRepository.save(currentAssessment);
-
-        List<Alert> alerts =
-                alertDecisionService.decide(
-                        candidate,
-                        previousObservation,
-                        enrichedObservation,
-                        previousAssessment,
-                        currentAssessment
-                );
+        List<Alert> alerts = alertDecisionService.decide(
+                candidate,
+                currentObservation,
+                previousObservation,
+                currentAssessment,
+                previousAssessment,
+                contentAnalysis
+        );
 
         if (alerts.isEmpty()) {
             return List.of();
         }
 
-        return alerts.stream()
+        List<Alert> savedAlerts = alerts.stream()
                 .map(alertRepository::save)
                 .toList();
-    }
 
-    private ContentAnalysis analyseContent(
-            Brand brand,
-            DomainObservation observation,
-            MonitoringPolicy policy
-    ) {
-        if (!policy.analyzeContent()) {
-            return null;
-        }
+        savedAlerts.forEach(alertSender::send);
 
-        HttpSnapshot http = observation.getHttp();
-
-        if (http == null
-                || http.body() == null
-                || http.body().isBlank()) {
-            return null;
-        }
-
-        return contentAnalyser.analyse(
-                http.body(),
-                brand.getName()
-        );
-    }
-
-    private DomainObservation enrichObservation(
-            DomainObservation observation,
-            ContentAnalysis contentAnalysis
-    ) {
-        Set<ContentIndicator> indicators =
-                contentAnalysis != null
-                        ? contentAnalysis.matchedIndicators()
-                        : Set.of();
-
-        String contentHash = null;
-
-        if (observation.getHttp() != null
-                && observation.getHttp().body() != null) {
-
-            contentHash = sha256(
-                    observation.getHttp().body()
-            );
-        }
-
-        return new DomainObservation(
-                observation.getCandidateId(),
-                contentHash,
-                indicators,
-                observation.getDns(),
-                observation.getHttp(),
-                observation.getId(),
-                observation.getMail(),
-                observation.getObservedAt(),
-                observation.getRegistration(),
-                observation.getScreenshotHash(),
-                observation.getTls(),
-                observation.getCertificateNames()
-        );
-    }
-
-    private String sha256(String value) {
-        try {
-            MessageDigest digest =
-                    MessageDigest.getInstance("SHA-256");
-
-            byte[] hash = digest.digest(
-                    value.getBytes(StandardCharsets.UTF_8)
-            );
-
-            StringBuilder result = new StringBuilder();
-
-            for (byte b : hash) {
-                result.append(
-                        String.format("%02x", b)
-                );
-            }
-
-            return result.toString();
-
-        } catch (NoSuchAlgorithmException e) {
-            throw new IllegalStateException(
-                    "SHA-256 algorithm is not available",
-                    e
-            );
-        }
+        return savedAlerts;
     }
 }
 
-Теперь цепочка такая:
+Важно: я здесь использовал сигнатуру monitor(...) с ContentAnalysis, потому что именно через неё у нас идут события вроде LOGIN_FORM_APPEARED и CONTENT_CHANGED. Если твой текущий MonitoringService имеет другую сигнатуру, сначала покажи его текущий код — я подгоню этот файл под реальные методы, не выдумывая API.
 
-MonitoringService
+5. application.properties
+
+Получатель — твой placeholder empfaenger:
+
+application.properties
+app.mail-recipient=empfaenger
+
+spring.mail.host=YOUR_SMTP_HOST
+spring.mail.port=587
+spring.mail.username=YOUR_SMTP_USERNAME
+spring.mail.password=${MAIL_PASSWORD}
+
+spring.mail.properties.mail.smtp.auth=true
+spring.mail.properties.mail.smtp.starttls.enable=true
+
+Пароль при этом не хранится в проекте:
+
+MAIL_PASSWORD=...
+6. pom.xml
+
+Добавить зависимость:
+
+pom.xml dependency
+<dependency>
+    <groupId>org.springframework.boot</groupId>
+    <artifactId>spring-boot-starter-mail</artifactId>
+</dependency>
+Что в итоге происходит
