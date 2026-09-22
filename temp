@@ -1,103 +1,801 @@
-```java
-package org.tafel.squating.scoring;
+1. RdapRegistrationAdapter
 
-import java.util.ArrayList;
-import java.util.List;
-import java.util.Set;
-import java.util.UUID;
+Сетевой запрос к data.iana.org больше не выполняется при создании Spring bean. Bootstrap загружается только при первом lookup.
 
-import org.springframework.stereotype.Service;
-import org.tafel.squating.domain.enums.ContentIndicator;
-import org.tafel.squating.domain.enums.RiskLevel;
-import org.tafel.squating.domain.model.RiskAssessment;
+RdapRegistrationAdapter.java
+package org.tafel.squating.adapters.registration;
 
-@Service
-public class RiskScoringService {
+import java.io.IOException;
+import java.net.IDN;
+import java.net.URI;
+import java.net.http.HttpClient;
+import java.net.http.HttpRequest;
+import java.net.http.HttpResponse;
+import java.time.Instant;
+import java.util.HashMap;
+import java.util.Iterator;
+import java.util.Map;
 
-    public RiskAssessment calculate(
-            UUID candidateId,
-            Set<ContentIndicator> indicators,
-            boolean mxConfigured,
-            boolean certificateFound,
-            boolean recentRegistration
+import org.springframework.stereotype.Component;
+import org.tafel.squating.domain.value.RegistrationSnapshot;
+import org.tafel.squating.ports.outbound.DomainRegistrationLookup;
+
+import com.fasterxml.jackson.databind.JsonNode;
+import com.fasterxml.jackson.databind.ObjectMapper;
+
+@Component
+public class RdapRegistrationAdapter implements DomainRegistrationLookup {
+
+    private static final URI RDAP_BOOTSTRAP_URI =
+            URI.create("https://data.iana.org/rdap/dns.json");
+
+    private final HttpClient httpClient;
+    private final ObjectMapper objectMapper;
+
+    private volatile Map<String, String> rdapServers;
+
+    public RdapRegistrationAdapter(
+            HttpClient httpClient,
+            ObjectMapper objectMapper
     ) {
-        if (candidateId == null) {
-            throw new IllegalArgumentException(
-                    "candidateId must not be null"
+        this.httpClient = httpClient;
+        this.objectMapper = objectMapper;
+    }
+
+    @Override
+    public RegistrationSnapshot lookupRegistration(String domain) {
+        if (domain == null || domain.isBlank()) {
+            throw new IllegalArgumentException("domain must not be blank");
+        }
+
+        String normalizedDomain = normalizeDomain(domain);
+        String tld = extractTld(normalizedDomain);
+
+        Map<String, String> servers = getRdapServers();
+
+        String rdapServer = servers.get(tld);
+
+        if (rdapServer == null) {
+            return new RegistrationSnapshot(
+                    false,
+                    null,
+                    null,
+                    null
             );
         }
 
-        int score = 0;
-        List<String> triggeredRules = new ArrayList<>();
+        URI lookupUri = URI.create(
+                ensureTrailingSlash(rdapServer)
+                        + "domain/"
+                        + normalizedDomain
+        );
 
-        /*
-         * Content indicators
-         */
-        if (indicators != null) {
-            for (ContentIndicator indicator : indicators) {
-                if (indicator == null) {
+        HttpRequest request = HttpRequest.newBuilder()
+                .uri(lookupUri)
+                .header("Accept", "application/rdap+json, application/json")
+                .GET()
+                .build();
+
+        try {
+            HttpResponse<String> response =
+                    httpClient.send(
+                            request,
+                            HttpResponse.BodyHandlers.ofString()
+                    );
+
+            if (response.statusCode() == 404) {
+                return new RegistrationSnapshot(
+                        false,
+                        null,
+                        null,
+                        null
+                );
+            }
+
+            if (response.statusCode() < 200
+                    || response.statusCode() >= 300) {
+                throw new IllegalStateException(
+                        "RDAP lookup failed for "
+                                + normalizedDomain
+                                + ": HTTP "
+                                + response.statusCode()
+                );
+            }
+
+            JsonNode root =
+                    objectMapper.readTree(response.body());
+
+            return new RegistrationSnapshot(
+                    true,
+                    extractEventDate(root, "registration"),
+                    extractEventDate(root, "expiration"),
+                    extractRegistrar(root)
+            );
+
+        } catch (InterruptedException e) {
+            Thread.currentThread().interrupt();
+
+            throw new IllegalStateException(
+                    "RDAP lookup interrupted for "
+                            + normalizedDomain,
+                    e
+            );
+
+        } catch (IOException e) {
+            throw new IllegalStateException(
+                    "RDAP lookup failed for "
+                            + normalizedDomain,
+                    e
+            );
+        }
+    }
+
+    private Map<String, String> getRdapServers() {
+        Map<String, String> servers = rdapServers;
+
+        if (servers != null) {
+            return servers;
+        }
+
+        synchronized (this) {
+            servers = rdapServers;
+
+            if (servers == null) {
+                servers = loadBootstrapServers();
+                rdapServers = servers;
+            }
+
+            return servers;
+        }
+    }
+
+    private Map<String, String> loadBootstrapServers() {
+        HttpRequest request = HttpRequest.newBuilder()
+                .uri(RDAP_BOOTSTRAP_URI)
+                .header("Accept", "application/json")
+                .GET()
+                .build();
+
+        try {
+            HttpResponse<String> response =
+                    httpClient.send(
+                            request,
+                            HttpResponse.BodyHandlers.ofString()
+                    );
+
+            if (response.statusCode() < 200
+                    || response.statusCode() >= 300) {
+                throw new IllegalStateException(
+                        "Unable to load IANA RDAP bootstrap registry: HTTP "
+                                + response.statusCode()
+                );
+            }
+
+            JsonNode root =
+                    objectMapper.readTree(response.body());
+
+            Map<String, String> result = new HashMap<>();
+
+            JsonNode services = root.get("services");
+
+            if (services == null || !services.isArray()) {
+                throw new IllegalStateException(
+                        "Invalid IANA RDAP bootstrap response"
+                );
+            }
+
+            for (JsonNode service : services) {
+                JsonNode tlds = service.get(0);
+                JsonNode urls = service.get(1);
+
+                if (tlds == null
+                        || !tlds.isArray()
+                        || urls == null
+                        || !urls.isArray()
+                        || urls.isEmpty()) {
                     continue;
                 }
 
-                int weight = RiskRules.CONTENT_WEIGHTS
-                        .getOrDefault(indicator, 0);
+                String server = urls.get(0).asText(null);
 
-                if (weight > 0) {
-                    score += weight;
-                    triggeredRules.add(indicator.name());
+                if (server == null || server.isBlank()) {
+                    continue;
+                }
+
+                for (JsonNode tldNode : tlds) {
+                    String tld = tldNode.asText(null);
+
+                    if (tld != null && !tld.isBlank()) {
+                        result.put(
+                                normalizeTld(tld),
+                                server
+                        );
+                    }
+                }
+            }
+
+            return Map.copyOf(result);
+
+        } catch (InterruptedException e) {
+            Thread.currentThread().interrupt();
+
+            throw new IllegalStateException(
+                    "Loading IANA RDAP bootstrap registry interrupted",
+                    e
+            );
+
+        } catch (IOException e) {
+            throw new IllegalStateException(
+                    "Unable to load IANA RDAP bootstrap registry",
+                    e
+            );
+        }
+    }
+
+    private String normalizeDomain(String domain) {
+        String normalized = domain.trim().toLowerCase();
+
+        if (normalized.endsWith(".")) {
+            normalized = normalized.substring(
+                    0,
+                    normalized.length() - 1
+            );
+        }
+
+        return IDN.toASCII(normalized);
+    }
+
+    private String extractTld(String domain) {
+        int dot = domain.lastIndexOf('.');
+
+        if (dot <= 0 || dot == domain.length() - 1) {
+            throw new IllegalArgumentException(
+                    "Invalid domain: " + domain
+            );
+        }
+
+        return normalizeTld(
+                domain.substring(dot + 1)
+        );
+    }
+
+    private String normalizeTld(String tld) {
+        String normalized = tld
+                .trim()
+                .toLowerCase();
+
+        while (normalized.startsWith(".")) {
+            normalized = normalized.substring(1);
+        }
+
+        return normalized;
+    }
+
+    private String ensureTrailingSlash(String url) {
+        return url.endsWith("/")
+                ? url
+                : url + "/";
+    }
+
+    private Instant extractEventDate(
+            JsonNode root,
+            String eventAction
+    ) {
+        JsonNode events = root.get("events");
+
+        if (events == null || !events.isArray()) {
+            return null;
+        }
+
+        for (JsonNode event : events) {
+            if (!eventAction.equalsIgnoreCase(
+                    event.path("eventAction").asText()
+            )) {
+                continue;
+            }
+
+            String eventDate =
+                    event.path("eventDate").asText(null);
+
+            if (eventDate == null || eventDate.isBlank()) {
+                continue;
+            }
+
+            try {
+                return Instant.parse(eventDate);
+            } catch (java.time.format.DateTimeParseException ignored) {
+                // Invalid event date should not invalidate
+                // the complete registration response.
+            }
+        }
+
+        return null;
+    }
+
+    private String extractRegistrar(JsonNode root) {
+        JsonNode entities = root.get("entities");
+
+        if (entities == null || !entities.isArray()) {
+            return null;
+        }
+
+        for (JsonNode entity : entities) {
+            if (!hasRole(entity, "registrar")) {
+                continue;
+            }
+
+            JsonNode vcardArray =
+                    entity.get("vcardArray");
+
+            if (vcardArray == null
+                    || !vcardArray.isArray()
+                    || vcardArray.size() < 2) {
+                continue;
+            }
+
+            JsonNode properties =
+                    vcardArray.get(1);
+
+            if (!properties.isArray()) {
+                continue;
+            }
+
+            for (JsonNode property : properties) {
+                if (!property.isArray()
+                        || property.size() < 4) {
+                    continue;
+                }
+
+                if ("fn".equalsIgnoreCase(
+                        property.get(0).asText()
+                )) {
+                    return property.get(3).asText(null);
                 }
             }
         }
 
-        /*
-         * MX
-         */
-        if (mxConfigured) {
-            score += RiskRules.MX_CONFIGURED_WEIGHT;
-            triggeredRules.add("MX configured");
+        return null;
+    }
+
+    private boolean hasRole(
+            JsonNode entity,
+            String expectedRole
+    ) {
+        JsonNode roles = entity.get("roles");
+
+        if (roles == null || !roles.isArray()) {
+            return false;
         }
 
-        /*
-         * Certificate
-         */
-        if (certificateFound) {
-            score += RiskRules.CERTIFICATE_FOUND_WEIGHT;
-            triggeredRules.add("Certificate found");
+        Iterator<JsonNode> iterator =
+                roles.elements();
+
+        while (iterator.hasNext()) {
+            if (expectedRole.equalsIgnoreCase(
+                    iterator.next().asText()
+            )) {
+                return true;
+            }
         }
 
-        /*
-         * Registration recency
-         */
-        if (recentRegistration) {
-            score += RiskRules.RECENT_REGISTRATION_WEIGHT;
-            triggeredRules.add("Recent registration");
+        return false;
+    }
+}
+
+Здесь важный момент: loadBootstrapServers() всё ещё может выбросить ошибку, но теперь не во время Spring startup. Ошибка произойдёт только тогда, когда реально понадобится RDAP.
+
+2. HttpAdapter
+
+Здесь я бы поставил лимит 1 MiB. Главное — не делать ofString() и потом проверять размер: тогда слишком большой response уже успеет целиком попасть в память.
+
+Используем ofInputStream() и читаем максимум MAX_RESPONSE_SIZE_BYTES + 1.
+
+HttpAdapter.java
+package org.tafel.squating.adapters.http;
+
+import java.io.ByteArrayOutputStream;
+import java.io.IOException;
+import java.io.InputStream;
+import java.net.URI;
+import java.net.http.HttpClient;
+import java.net.http.HttpRequest;
+import java.net.http.HttpResponse;
+import java.nio.charset.StandardCharsets;
+import java.util.ArrayList;
+import java.util.List;
+import java.util.regex.Matcher;
+import java.util.regex.Pattern;
+
+import org.springframework.stereotype.Component;
+import org.tafel.squating.domain.value.HttpSnapshot;
+import org.tafel.squating.ports.outbound.WebInspector;
+
+@Component
+public class HttpAdapter implements WebInspector {
+
+    private static final String USER_AGENT =
+            "Mozilla/5.0 (compatible; SiteSquating/1.0)";
+
+    private static final int MAX_REDIRECTS = 10;
+
+    private static final int MAX_RESPONSE_SIZE_BYTES =
+            1024 * 1024;
+
+    private static final Pattern TITLE_PATTERN =
+            Pattern.compile(
+                    "<title[^>]*>(.*?)</title>",
+                    Pattern.CASE_INSENSITIVE
+                            | Pattern.DOTALL
+            );
+
+    private final HttpClient httpClient;
+
+    public HttpAdapter(HttpClient httpClient) {
+        this.httpClient = httpClient;
+    }
+
+    @Override
+    public HttpSnapshot inspect(String domain) {
+        if (domain == null || domain.isBlank()) {
+            throw new IllegalArgumentException("domain must not be blank");
         }
 
-        RiskLevel riskLevel = determineLevel(score);
+        URI initialUri = createInitialUri(domain);
 
-        return new RiskAssessment(
-                null,
-                candidateId,
-                score,
-                riskLevel,
-                triggeredRules
+        List<String> redirectChain = new ArrayList<>();
+
+        URI currentUri = initialUri;
+
+        for (int redirectCount = 0;
+             redirectCount <= MAX_REDIRECTS;
+             redirectCount++) {
+
+            HttpRequest request = HttpRequest.newBuilder()
+                    .uri(currentUri)
+                    .header("User-Agent", USER_AGENT)
+                    .header("Accept", "text/html,application/xhtml+xml,*/*")
+                    .GET()
+                    .build();
+
+            try {
+                HttpResponse<InputStream> response =
+                        httpClient.send(
+                                request,
+                                HttpResponse.BodyHandlers.ofInputStream()
+                        );
+
+                int statusCode = response.statusCode();
+
+                if (isRedirect(statusCode)) {
+                    String location =
+                            response.headers()
+                                    .firstValue("Location")
+                                    .orElse(null);
+
+                    if (location == null || location.isBlank()) {
+                        return createSnapshot(
+                                response,
+                                currentUri,
+                                redirectChain
+                        );
+                    }
+
+                    URI nextUri = currentUri.resolve(location);
+
+                    redirectChain.add(nextUri.toString());
+                    currentUri = nextUri;
+
+                    response.body().close();
+
+                    continue;
+                }
+
+                return createSnapshot(
+                        response,
+                        currentUri,
+                        redirectChain
+                );
+
+            } catch (InterruptedException e) {
+                Thread.currentThread().interrupt();
+
+                throw new IllegalStateException(
+                        "HTTP inspection interrupted for " + domain,
+                        e
+                );
+
+            } catch (IOException e) {
+                throw new IllegalStateException(
+                        "HTTP inspection failed for " + domain,
+                        e
+                );
+            }
+        }
+
+        throw new IllegalStateException(
+                "Maximum HTTP redirects exceeded for " + domain
         );
     }
 
-    private RiskLevel determineLevel(int score) {
-        if (score <= RiskRules.LOW_MAX_SCORE) {
-            return RiskLevel.LOW;
+    private HttpSnapshot createSnapshot(
+            HttpResponse<InputStream> response,
+            URI finalUri,
+            List<String> redirectChain
+    ) throws IOException {
+
+        String body = readBody(response.body());
+
+        return new HttpSnapshot(
+                response.statusCode(),
+                finalUri.toString(),
+                redirectChain,
+                extractTitle(body),
+                response.headers()
+                        .firstValue("Content-Type")
+                        .orElse(null),
+                body != null
+                        ? body.getBytes(StandardCharsets.UTF_8).length
+                        : 0,
+                body
+        );
+    }
+
+    private String readBody(InputStream inputStream)
+            throws IOException {
+
+        if (inputStream == null) {
+            return null;
         }
 
-        if (score <= RiskRules.MEDIUM_MAX_SCORE) {
-            return RiskLevel.MEDIUM;
+        try (InputStream input = inputStream;
+             ByteArrayOutputStream output =
+                     new ByteArrayOutputStream()) {
+
+            byte[] buffer = new byte[8192];
+
+            int totalBytes = 0;
+            int bytesRead;
+
+            while ((bytesRead = input.read(buffer)) != -1) {
+                totalBytes += bytesRead;
+
+                if (totalBytes > MAX_RESPONSE_SIZE_BYTES) {
+                    throw new IllegalStateException(
+                            "HTTP response exceeds maximum allowed size of "
+                                    + MAX_RESPONSE_SIZE_BYTES
+                                    + " bytes"
+                    );
+                }
+
+                output.write(buffer, 0, bytesRead);
+            }
+
+            return output.toString(StandardCharsets.UTF_8);
+        }
+    }
+
+    private URI createInitialUri(String domain) {
+        String normalized = domain.trim();
+
+        if (normalized.startsWith("http://")
+                || normalized.startsWith("https://")) {
+            return URI.create(normalized);
         }
 
-        if (score <= RiskRules.HIGH_MAX_SCORE) {
-            return RiskLevel.HIGH;
+        return URI.create("https://" + normalized);
+    }
+
+    private boolean isRedirect(int statusCode) {
+        return statusCode >= 300 && statusCode < 400;
+    }
+
+    private String extractTitle(String html) {
+        if (html == null || html.isBlank()) {
+            return null;
         }
 
-        return RiskLevel.CRITICAL;
+        Matcher matcher = TITLE_PATTERN.matcher(html);
+
+        if (!matcher.find()) {
+            return null;
+        }
+
+        return matcher.group(1)
+                .replaceAll("\\s+", " ")
+                .trim();
     }
 }
-```
+
+Это именно memory protection, а не просто проверка Content-Length.
+
+3. TlsAdapter
+
+Здесь меняем принцип создания socket:
+
+было:
+
+createSocket()
+→ connect(domain, 443)
+→ handshake
+
+становится:
+
+SSLSocketFactory.createSocket(domain, 443)
+→ handshake
+
+То есть hostname передаётся непосредственно в TLS socket creation, что позволяет JSSE использовать hostname для TLS/SNI.
+
+И catches становятся конкретными.
+
+TlsAdapter.java
+package org.tafel.squating.adapters.tls;
+
+import java.io.IOException;
+import java.net.SocketTimeoutException;
+import java.security.MessageDigest;
+import java.security.NoSuchAlgorithmException;
+import java.security.cert.Certificate;
+import java.security.cert.CertificateEncodingException;
+import java.security.cert.CertificateParsingException;
+import java.security.cert.X509Certificate;
+import java.util.ArrayList;
+import java.util.Collection;
+import java.util.List;
+
+import javax.net.ssl.SSLHandshakeException;
+import javax.net.ssl.SSLSocket;
+import javax.net.ssl.SSLSocketFactory;
+
+import org.springframework.stereotype.Component;
+import org.tafel.squating.domain.value.TlsSnapshot;
+import org.tafel.squating.ports.outbound.TlsInspector;
+
+@Component
+public class TlsAdapter implements TlsInspector {
+
+    private static final int HTTPS_PORT = 443;
+    private static final int SOCKET_TIMEOUT_MILLIS = 5000;
+
+    @Override
+    public TlsSnapshot inspect(String domain) {
+        if (domain == null || domain.isBlank()) {
+            throw new IllegalArgumentException("domain must not be blank");
+        }
+
+        String normalizedDomain = normalizeDomain(domain);
+
+        try (SSLSocket socket = createSocket(normalizedDomain)) {
+            socket.setSoTimeout(SOCKET_TIMEOUT_MILLIS);
+
+            socket.startHandshake();
+
+            Certificate[] certificates =
+                    socket.getSession().getPeerCertificates();
+
+            if (certificates.length == 0
+                    || !(certificates[0] instanceof X509Certificate certificate)) {
+                return emptySnapshot();
+            }
+
+            return new TlsSnapshot(
+                    certificate.getIssuerX500Principal().getName(),
+                    certificate.getSubjectX500Principal().getName(),
+                    extractSubjectAlternativeNames(certificate),
+                    certificate.getNotBefore().toInstant(),
+                    certificate.getNotAfter().toInstant(),
+                    calculateFingerprint(certificate)
+            );
+
+        } catch (SocketTimeoutException e) {
+            return emptySnapshot();
+
+        } catch (SSLHandshakeException e) {
+            return emptySnapshot();
+
+        } catch (IOException e) {
+            return emptySnapshot();
+        }
+    }
+
+    private SSLSocket createSocket(String domain)
+            throws IOException {
+
+        SSLSocketFactory factory =
+                (SSLSocketFactory) SSLSocketFactory.getDefault();
+
+        return (SSLSocket) factory.createSocket(
+                domain,
+                HTTPS_PORT
+        );
+    }
+
+    private List<String> extractSubjectAlternativeNames(
+            X509Certificate certificate
+    ) {
+        try {
+            Collection<List<?>> names =
+                    certificate.getSubjectAlternativeNames();
+
+            if (names == null) {
+                return List.of();
+            }
+
+            List<String> result = new ArrayList<>();
+
+            for (List<?> entry : names) {
+                if (entry == null || entry.size() < 2) {
+                    continue;
+                }
+
+                Object value = entry.get(1);
+
+                if (value != null) {
+                    result.add(value.toString());
+                }
+            }
+
+            return result;
+
+        } catch (CertificateParsingException e) {
+            return List.of();
+        }
+    }
+
+    private String calculateFingerprint(
+            X509Certificate certificate
+    ) throws NoSuchAlgorithmException, CertificateEncodingException {
+
+        MessageDigest digest =
+                MessageDigest.getInstance("SHA-256");
+
+        byte[] hash = digest.digest(
+                certificate.getEncoded()
+        );
+
+        StringBuilder result = new StringBuilder();
+
+        for (byte value : hash) {
+            if (!result.isEmpty()) {
+                result.append(':');
+            }
+
+            result.append(String.format("%02X", value));
+        }
+
+        return result.toString();
+    }
+
+    private String normalizeDomain(String domain) {
+        String normalized = domain.trim().toLowerCase();
+
+        if (normalized.startsWith("https://")) {
+            normalized = normalized.substring(8);
+
+        } else if (normalized.startsWith("http://")) {
+            normalized = normalized.substring(7);
+        }
+
+        int slashIndex = normalized.indexOf('/');
+
+        if (slashIndex >= 0) {
+            normalized = normalized.substring(
+                    0,
+                    slashIndex
+            );
+        }
+
+        return normalized;
+    }
+
+    private TlsSnapshot emptySnapshot() {
+        return new TlsSnapshot(
+                null,
+                null,
+                List.of(),
+                null,
+                null,
+                null
+        );
+    }
+}
+Что в итоге изменилось
