@@ -1,217 +1,276 @@
-Это правильно, потому что наличие сертификата в CT не означает, что HTTPS сейчас доступен.
+1. Реализация ScreenshotService
 
-RiskRules.java — CT weight
-package org.tafel.squating.scoring;
+Создаём PlaywrightScreenshotAdapter в adapters/screenshot.
 
-import java.util.Map;
+Он будет:
 
-import org.tafel.squating.domain.enums.ContentIndicator;
+создавать outputDirectory, если его нет;
+открывать https://domain;
+делать screenshot;
+сохранять domain-timestamp.png;
+считать SHA-256 содержимого самого PNG;
+возвращать этот hash;
+закрывать browser/context/playwright даже при ошибке.
+PlaywrightScreenshotAdapter.java
+package org.tafel.squating.adapters.screenshot;
 
-public final class RiskRules {
+import com.microsoft.playwright.Browser;
+import com.microsoft.playwright.BrowserType;
+import com.microsoft.playwright.Page;
+import com.microsoft.playwright.Playwright;
+import com.microsoft.playwright.options.WaitUntilState;
+import org.springframework.stereotype.Component;
+import org.tafel.squating.ports.outbound.ScreenshotService;
 
-    private RiskRules() {
+import java.io.IOException;
+import java.nio.file.Files;
+import java.nio.file.Path;
+import java.nio.file.StandardOpenOption;
+import java.security.MessageDigest;
+import java.security.NoSuchAlgorithmException;
+import java.time.Instant;
+
+@Component
+public class PlaywrightScreenshotAdapter implements ScreenshotService {
+
+    private static final int NAVIGATION_TIMEOUT_MILLIS = 10_000;
+
+    @Override
+    public String capture(
+            String domain,
+            String outputDirectory
+    ) {
+        if (domain == null || domain.isBlank()) {
+            throw new IllegalArgumentException(
+                    "domain must not be blank"
+            );
+        }
+
+        if (outputDirectory == null || outputDirectory.isBlank()) {
+            throw new IllegalArgumentException(
+                    "outputDirectory must not be blank"
+            );
+        }
+
+        String normalizedDomain = normalizeDomain(domain);
+
+        Path directory = Path.of(outputDirectory);
+
+        try {
+            Files.createDirectories(directory);
+
+            String fileName =
+                    sanitizeFileName(normalizedDomain)
+                            + "-"
+                            + Instant.now().toEpochMilli()
+                            + ".png";
+
+            Path screenshotPath = directory.resolve(fileName);
+
+            byte[] screenshotBytes;
+
+            try (Playwright playwright = Playwright.create();
+                 Browser browser = playwright.chromium().launch(
+                         new BrowserType.LaunchOptions()
+                                 .setHeadless(true)
+                 )) {
+
+                Page page = browser.newPage();
+
+                page.setDefaultNavigationTimeout(
+                        NAVIGATION_TIMEOUT_MILLIS
+                );
+
+                page.navigate(
+                        "https://" + normalizedDomain,
+                        new Page.NavigateOptions()
+                                .setWaitUntil(
+                                        WaitUntilState.DOMCONTENTLOADED
+                                )
+                );
+
+                screenshotBytes = page.screenshot(
+                        new Page.ScreenshotOptions()
+                                .setPath(screenshotPath)
+                                .setFullPage(true)
+                );
+            }
+
+            return calculateSha256(screenshotBytes);
+
+        } catch (IOException e) {
+            throw new IllegalStateException(
+                    "Unable to save screenshot for "
+                            + normalizedDomain,
+                    e
+            );
+        }
     }
 
-    /*
-     * Content weights
-     */
-    public static final int BRAND_MENTIONED_WEIGHT = 15;
-    public static final int LOGIN_FORM_WEIGHT = 25;
-    public static final int PASSWORD_FIELD_WEIGHT = 25;
-    public static final int WALLET_KEYWORDS_WEIGHT = 25;
-    public static final int PAYMENT_KEYWORDS_WEIGHT = 20;
+    private String normalizeDomain(String domain) {
+        String normalized = domain.trim().toLowerCase();
 
-    /*
-     * Infrastructure / registration weights
-     */
-    public static final int MX_CONFIGURED_WEIGHT = 10;
-    public static final int CERTIFICATE_FOUND_WEIGHT = 10;
-    public static final int CERTIFICATE_TRANSPARENCY_WEIGHT = 15;
-    public static final int RECENT_REGISTRATION_WEIGHT = 15;
+        if (normalized.startsWith("https://")) {
+            normalized = normalized.substring(8);
+        } else if (normalized.startsWith("http://")) {
+            normalized = normalized.substring(7);
+        }
 
-    /*
-     * Risk level thresholds
-     *
-     * 0-29   LOW
-     * 30-59  MEDIUM
-     * 60-79  HIGH
-     * 80+    CRITICAL
-     */
-    public static final int LOW_MAX_SCORE = 29;
-    public static final int MEDIUM_MAX_SCORE = 59;
-    public static final int HIGH_MAX_SCORE = 79;
+        int slashIndex = normalized.indexOf('/');
 
-    public static final Map<ContentIndicator, Integer> CONTENT_WEIGHTS = Map.of(
-            ContentIndicator.BRAND_MENTIONED,
-            BRAND_MENTIONED_WEIGHT,
+        if (slashIndex >= 0) {
+            normalized = normalized.substring(
+                    0,
+                    slashIndex
+            );
+        }
 
-            ContentIndicator.LOGIN_FORM,
-            LOGIN_FORM_WEIGHT,
+        return normalized;
+    }
 
-            ContentIndicator.PASSWORD_FIELD,
-            PASSWORD_FIELD_WEIGHT,
+    private String sanitizeFileName(String domain) {
+        return domain.replaceAll(
+                "[^a-zA-Z0-9.-]",
+                "_"
+        );
+    }
 
-            ContentIndicator.WALLET_KEYWORDS,
-            WALLET_KEYWORDS_WEIGHT,
+    private String calculateSha256(byte[] data) {
+        try {
+            MessageDigest digest =
+                    MessageDigest.getInstance("SHA-256");
 
-            ContentIndicator.PAYMENT_KEYWORDS,
-            PAYMENT_KEYWORDS_WEIGHT
-    );
+            byte[] hash = digest.digest(data);
+
+            StringBuilder result =
+                    new StringBuilder();
+
+            for (byte value : hash) {
+                if (!result.isEmpty()) {
+                    result.append(':');
+                }
+
+                result.append(
+                        String.format("%02X", value)
+                );
+            }
+
+            return result.toString();
+
+        } catch (NoSuchAlgorithmException e) {
+            throw new IllegalStateException(
+                    "SHA-256 algorithm is not available",
+                    e
+            );
+        }
+    }
 }
 
-Я намеренно не возвращаю HIGH_TEXT_SIMILARITY_*, потому что Similarity мы уже удалили из согласованной локальной версии.
+Здесь важный момент: page.screenshot(...setPath(...)) одновременно сохраняет файл, а возвращаемый byte[] — это те же PNG-данные, поэтому hash считается именно от screenshot, а не от HTML или имени файла.
 
-2. RiskScoringService
+2. Добавляем Playwright dependency
+
+В pom.xml:
+
+pom.xml — Playwright dependency
+<dependency>
+    <groupId>com.microsoft.playwright</groupId>
+    <artifactId>playwright</artifactId>
+    <version>1.55.0</version>
+</dependency>
+
+После первого запуска Playwright также потребует Chromium. Java dependency сама по себе не означает, что браузер уже установлен.
+
+Для Maven-проекта после dependency можно установить browser binary командой:
+
+mvn exec:java \
+  -Dexec.mainClass=com.microsoft.playwright.CLI \
+  -Dexec.args="install chromium"
+3. Подключаем ScreenshotService к DomainInspectionService
+
+Сейчас DomainInspectionService его вообще не знает.
 
 Добавляем:
 
-boolean certificateTransparencyFound
+private final ScreenshotService screenshotService;
+private final ApplicationProperties applicationProperties;
 
-и начисляем 15 баллов.
+И в inspect():
 
-RiskScoringService.java — CT scoring
-package org.tafel.squating.scoring;
+String screenshotHash = null;
 
-import java.util.ArrayList;
+if (policy.takeScreenshots()) {
+    screenshotHash = screenshotService.capture(
+            domain,
+            applicationProperties.getEvidenceDirectory()
+    );
+}
+
+После этого передаём screenshotHash в DomainObservation.
+
+Полная версия:
+
+DomainInspectionService.java
+package org.tafel.squating.application;
+
+import java.time.Instant;
 import java.util.List;
 import java.util.Set;
 import java.util.UUID;
 
 import org.springframework.stereotype.Service;
-import org.tafel.squating.domain.enums.ContentIndicator;
-import org.tafel.squating.domain.enums.RiskLevel;
-import org.tafel.squating.domain.model.RiskAssessment;
-
-@Service
-public class RiskScoringService {
-
-    public RiskAssessment calculate(
-            UUID candidateId,
-            Set<ContentIndicator> indicators,
-            boolean mxConfigured,
-            boolean certificateFound,
-            boolean certificateTransparencyFound,
-            boolean recentRegistration
-    ) {
-        if (candidateId == null) {
-            throw new IllegalArgumentException(
-                    "candidateId must not be null"
-            );
-        }
-
-        int score = 0;
-        List<String> triggeredRules = new ArrayList<>();
-
-        if (indicators != null) {
-            for (ContentIndicator indicator : indicators) {
-                if (indicator == null) {
-                    continue;
-                }
-
-                int weight = RiskRules.CONTENT_WEIGHTS
-                        .getOrDefault(indicator, 0);
-
-                if (weight > 0) {
-                    score += weight;
-                    triggeredRules.add(indicator.name());
-                }
-            }
-        }
-
-        if (mxConfigured) {
-            score += RiskRules.MX_CONFIGURED_WEIGHT;
-            triggeredRules.add("MX configured");
-        }
-
-        if (certificateFound) {
-            score += RiskRules.CERTIFICATE_FOUND_WEIGHT;
-            triggeredRules.add("TLS certificate found");
-        }
-
-        if (certificateTransparencyFound) {
-            score += RiskRules.CERTIFICATE_TRANSPARENCY_WEIGHT;
-            triggeredRules.add("Certificate found in Certificate Transparency");
-        }
-
-        if (recentRegistration) {
-            score += RiskRules.RECENT_REGISTRATION_WEIGHT;
-            triggeredRules.add("Recent registration");
-        }
-
-        RiskLevel riskLevel = determineLevel(score);
-
-        return new RiskAssessment(
-                null,
-                candidateId,
-                score,
-                riskLevel,
-                triggeredRules
-        );
-    }
-
-    private RiskLevel determineLevel(int score) {
-        if (score <= RiskRules.LOW_MAX_SCORE) {
-            return RiskLevel.LOW;
-        }
-
-        if (score <= RiskRules.MEDIUM_MAX_SCORE) {
-            return RiskLevel.MEDIUM;
-        }
-
-        if (score <= RiskRules.HIGH_MAX_SCORE) {
-            return RiskLevel.HIGH;
-        }
-
-        return RiskLevel.CRITICAL;
-    }
-}
-3. RiskAssessmentService
-
-Здесь CT уже есть в DomainObservation:
-
-observation.getCertificateNames()
-
-Поэтому ничего нового в DomainInspectionService или DomainObservation создавать не нужно.
-
-Принцип:
-
-boolean certificateTransparencyFound =
-        observation.getCertificateNames() != null
-                && !observation.getCertificateNames().isEmpty();
-
-И передаём его в scoring.
-
-С учётом того, что твоя локальная версия уже очищена от Similarity, блок должен выглядеть так:
-
-RiskAssessmentService.java — CT integration
-package org.tafel.squating.application;
-
-import java.util.Set;
-
-import org.springframework.stereotype.Service;
-import org.tafel.squating.analysis.ContentAnalysis;
-import org.tafel.squating.domain.enums.ContentIndicator;
+import org.tafel.squating.config.ApplicationProperties;
 import org.tafel.squating.domain.model.CandidateDomain;
 import org.tafel.squating.domain.model.DomainObservation;
-import org.tafel.squating.domain.model.RiskAssessment;
-import org.tafel.squating.scoring.RiskScoringService;
+import org.tafel.squating.domain.value.DnsSnapshot;
+import org.tafel.squating.domain.value.HttpSnapshot;
+import org.tafel.squating.domain.value.MailSnapshot;
+import org.tafel.squating.domain.value.MonitoringPolicy;
+import org.tafel.squating.domain.value.RegistrationSnapshot;
+import org.tafel.squating.domain.value.TlsSnapshot;
+import org.tafel.squating.ports.outbound.CertificateDiscovery;
+import org.tafel.squating.ports.outbound.DnsInspector;
+import org.tafel.squating.ports.outbound.DomainRegistrationLookup;
+import org.tafel.squating.ports.outbound.MailInspector;
+import org.tafel.squating.ports.outbound.ScreenshotService;
+import org.tafel.squating.ports.outbound.TlsInspector;
+import org.tafel.squating.ports.outbound.WebInspector;
 
 @Service
-public class RiskAssessmentService {
+public class DomainInspectionService {
 
-    private final RiskScoringService riskScoringService;
+    private final DomainRegistrationLookup registrationLookup;
+    private final DnsInspector dnsInspector;
+    private final WebInspector webInspector;
+    private final TlsInspector tlsInspector;
+    private final MailInspector mailInspector;
+    private final CertificateDiscovery certificateDiscovery;
+    private final ScreenshotService screenshotService;
+    private final ApplicationProperties applicationProperties;
 
-    public RiskAssessmentService(
-            RiskScoringService riskScoringService
+    public DomainInspectionService(
+            DomainRegistrationLookup registrationLookup,
+            DnsInspector dnsInspector,
+            WebInspector webInspector,
+            TlsInspector tlsInspector,
+            MailInspector mailInspector,
+            CertificateDiscovery certificateDiscovery,
+            ScreenshotService screenshotService,
+            ApplicationProperties applicationProperties
     ) {
-        this.riskScoringService = riskScoringService;
+        this.registrationLookup = registrationLookup;
+        this.dnsInspector = dnsInspector;
+        this.webInspector = webInspector;
+        this.tlsInspector = tlsInspector;
+        this.mailInspector = mailInspector;
+        this.certificateDiscovery = certificateDiscovery;
+        this.screenshotService = screenshotService;
+        this.applicationProperties = applicationProperties;
     }
 
-    public RiskAssessment assess(
+    public DomainObservation inspect(
             CandidateDomain candidate,
-            DomainObservation observation,
-            ContentAnalysis contentAnalysis,
-            boolean recentRegistration
+            MonitoringPolicy policy
     ) {
         if (candidate == null) {
             throw new IllegalArgumentException(
@@ -219,369 +278,74 @@ public class RiskAssessmentService {
             );
         }
 
-        if (observation == null) {
+        if (policy == null) {
             throw new IllegalArgumentException(
-                    "observation must not be null"
+                    "policy must not be null"
             );
         }
 
-        if (!candidate.getId().equals(
-                observation.getCandidateId())) {
-            throw new IllegalArgumentException(
-                    "Candidate id does not match observation"
-            );
+        RegistrationSnapshot registration = null;
+        DnsSnapshot dns = null;
+        HttpSnapshot http = null;
+        TlsSnapshot tls = null;
+        MailSnapshot mail = null;
+
+        List<String> certificateNames = List.of();
+
+        String screenshotHash = null;
+
+        String domain = candidate.getDomain();
+
+        if (policy.checkRdap()) {
+            registration =
+                    registrationLookup.lookupRegistration(domain);
         }
 
-        Set<ContentIndicator> indicators =
-                contentAnalysis != null
-                        ? contentAnalysis.matchedIndicators()
-                        : Set.of();
+        if (policy.checkDns()) {
+            dns = dnsInspector.inspect(domain);
+        }
 
-        boolean mxConfigured =
-                observation.getMail() != null
-                        && observation.getMail().mxConfigured();
+        if (policy.checkHttp()) {
+            http = webInspector.inspect(domain);
+        }
 
-        boolean certificateFound =
-                observation.getTls() != null
-                        && observation.getTls()
-                                .certificateFingerprint() != null
-                        && !observation.getTls()
-                                .certificateFingerprint()
-                                .isBlank();
+        if (policy.checkTls()) {
+            tls = tlsInspector.inspect(domain);
+        }
 
-        boolean certificateTransparencyFound =
-                observation.getCertificateNames() != null
-                        && !observation.getCertificateNames().isEmpty();
+        if (policy.checkMx()) {
+            mail = mailInspector.inspect(domain);
+        }
 
-        return riskScoringService.calculate(
+        if (policy.checkCertificateTransparency()) {
+            certificateNames =
+                    certificateDiscovery.findCertificates(domain);
+        }
+
+        if (policy.takeScreenshots()) {
+            screenshotHash =
+                    screenshotService.capture(
+                            domain,
+                            applicationProperties.getEvidenceDirectory()
+                    );
+        }
+
+        return new DomainObservation(
                 candidate.getId(),
-                indicators,
-                mxConfigured,
-                certificateFound,
-                certificateTransparencyFound,
-                recentRegistration
-        );
-    }
-}
-
-Важно: GitHub сейчас показывает старую версию этого файла с Similarity, но это именно тот stale-код, который мы уже договорились считать удалённым локально. Я не возвращаю Similarity.
-
-4. AlertDecisionService
-
-Тут нужно исправить главное: CT должен быть самостоятельным источником CERTIFICATE_APPEARED.
-
-Сейчас проверяется только:
-
-TLS fingerprint
-
-Делаем:
-
-certificateAppeared =
-    TLS certificate appeared
-    OR
-    CT certificate appeared
-
-При этом изменение одного CT-набора с cert1 на cert2 не должно считаться новым появлением. Нам интересно именно:
-
-0 certificates → 1+ certificates
-AlertDecisionService.java — CT alert decision
-package org.tafel.squating.application;
-
-import org.springframework.stereotype.Service;
-import org.tafel.squating.domain.enums.AlertType;
-import org.tafel.squating.domain.enums.ContentIndicator;
-import org.tafel.squating.domain.enums.RiskLevel;
-import org.tafel.squating.domain.model.Alert;
-import org.tafel.squating.domain.model.CandidateDomain;
-import org.tafel.squating.domain.model.DomainObservation;
-import org.tafel.squating.domain.model.RiskAssessment;
-
-@Service
-public class AlertDecisionService {
-
-    public Alert decide(
-            CandidateDomain candidate,
-            DomainObservation previousObservation,
-            DomainObservation currentObservation,
-            RiskAssessment previousAssessment,
-            RiskAssessment currentAssessment
-    ) {
-        if (candidate == null) {
-            throw new IllegalArgumentException(
-                    "candidate must not be null"
-            );
-        }
-
-        if (currentObservation == null) {
-            throw new IllegalArgumentException(
-                    "currentObservation must not be null"
-            );
-        }
-
-        if (currentAssessment == null) {
-            throw new IllegalArgumentException(
-                    "currentAssessment must not be null"
-            );
-        }
-
-        if (!candidate.getId().equals(
-                currentObservation.getCandidateId())) {
-            throw new IllegalArgumentException(
-                    "Candidate id does not match observation"
-            );
-        }
-
-        if (!candidate.getId().equals(
-                currentAssessment.getCandidateId())) {
-            throw new IllegalArgumentException(
-                    "Candidate id does not match assessment"
-            );
-        }
-
-        AlertType alertType = determineAlertType(
-                previousObservation,
-                currentObservation,
-                previousAssessment,
-                currentAssessment
-        );
-
-        if (alertType == null) {
-            return null;
-        }
-
-        return new Alert(
                 null,
-                candidate.getBrandId(),
-                candidate.getId(),
-                candidate.getDomain(),
-                alertType,
-                currentAssessment.getRiskLevel(),
-                buildTitle(alertType),
-                buildMessage(
-                        alertType,
-                        candidate,
-                        currentAssessment
-                )
-        );
-    }
-
-    private AlertType determineAlertType(
-            DomainObservation previousObservation,
-            DomainObservation currentObservation,
-            RiskAssessment previousAssessment,
-            RiskAssessment currentAssessment
-    ) {
-        if (previousObservation == null) {
-            return AlertType.NEW_CANDIDATE;
-        }
-
-        if (isRiskEscalation(
-                previousAssessment,
-                currentAssessment
-        )) {
-            return AlertType.RISK_ESCALATION;
-        }
-
-        if (mxAppeared(
-                previousObservation,
-                currentObservation
-        )) {
-            return AlertType.MX_APPEARED;
-        }
-
-        if (certificateAppeared(
-                previousObservation,
-                currentObservation
-        )) {
-            return AlertType.CERTIFICATE_APPEARED;
-        }
-
-        if (loginFormAppeared(
-                previousObservation,
-                currentObservation
-        )) {
-            return AlertType.LOGIN_FORM_APPEARED;
-        }
-
-        if (contentChanged(
-                previousObservation,
-                currentObservation
-        )) {
-            return AlertType.CONTENT_CHANGED;
-        }
-
-        return null;
-    }
-
-    private boolean isRiskEscalation(
-            RiskAssessment previousAssessment,
-            RiskAssessment currentAssessment
-    ) {
-        if (previousAssessment == null
-                || previousAssessment.getRiskLevel() == null
-                || currentAssessment.getRiskLevel() == null) {
-            return false;
-        }
-
-        RiskLevel previousLevel =
-                previousAssessment.getRiskLevel();
-
-        RiskLevel currentLevel =
-                currentAssessment.getRiskLevel();
-
-        return (previousLevel == RiskLevel.MEDIUM
-                    && currentLevel == RiskLevel.HIGH)
-                || (previousLevel == RiskLevel.HIGH
-                    && currentLevel == RiskLevel.CRITICAL);
-    }
-
-    private boolean mxAppeared(
-            DomainObservation previousObservation,
-            DomainObservation currentObservation
-    ) {
-        if (currentObservation.getMail() == null
-                || !currentObservation.getMail().mxConfigured()) {
-            return false;
-        }
-
-        if (previousObservation.getMail() == null) {
-            return true;
-        }
-
-        return !previousObservation.getMail().mxConfigured();
-    }
-
-    private boolean certificateAppeared(
-            DomainObservation previousObservation,
-            DomainObservation currentObservation
-    ) {
-        return tlsCertificateAppeared(
-                previousObservation,
-                currentObservation
-        ) || certificateTransparencyAppeared(
-                previousObservation,
-                currentObservation
-        );
-    }
-
-    private boolean tlsCertificateAppeared(
-            DomainObservation previousObservation,
-            DomainObservation currentObservation
-    ) {
-        String currentFingerprint =
-                currentObservation.getTls() != null
-                        ? currentObservation.getTls()
-                            .certificateFingerprint()
-                        : null;
-
-        if (currentFingerprint == null
-                || currentFingerprint.isBlank()) {
-            return false;
-        }
-
-        if (previousObservation.getTls() == null) {
-            return true;
-        }
-
-        String previousFingerprint =
-                previousObservation.getTls()
-                        .certificateFingerprint();
-
-        return previousFingerprint == null
-                || previousFingerprint.isBlank();
-    }
-
-    private boolean certificateTransparencyAppeared(
-            DomainObservation previousObservation,
-            DomainObservation currentObservation
-    ) {
-        boolean currentHasCertificates =
-                currentObservation.getCertificateNames() != null
-                        && !currentObservation
-                                .getCertificateNames()
-                                .isEmpty();
-
-        if (!currentHasCertificates) {
-            return false;
-        }
-
-        boolean previousHasCertificates =
-                previousObservation.getCertificateNames() != null
-                        && !previousObservation
-                                .getCertificateNames()
-                                .isEmpty();
-
-        return !previousHasCertificates;
-    }
-
-    private boolean loginFormAppeared(
-            DomainObservation previousObservation,
-            DomainObservation currentObservation
-    ) {
-        boolean previousLogin =
-                previousObservation.getContentIndicators()
-                        .contains(ContentIndicator.LOGIN_FORM);
-
-        boolean currentLogin =
-                currentObservation.getContentIndicators()
-                        .contains(ContentIndicator.LOGIN_FORM);
-
-        return !previousLogin && currentLogin;
-    }
-
-    private boolean contentChanged(
-            DomainObservation previousObservation,
-            DomainObservation currentObservation
-    ) {
-        String previousHash =
-                previousObservation.getContentHash();
-
-        String currentHash =
-                currentObservation.getContentHash();
-
-        if (previousHash == null || currentHash == null) {
-            return false;
-        }
-
-        return !previousHash.equals(currentHash);
-    }
-
-    private String buildTitle(AlertType alertType) {
-        return switch (alertType) {
-            case NEW_CANDIDATE ->
-                    "New suspicious candidate detected";
-
-            case RISK_ESCALATION ->
-                    "Risk level escalated";
-
-            case CONTENT_CHANGED ->
-                    "Candidate content changed";
-
-            case MX_APPEARED ->
-                    "Mail configuration appeared";
-
-            case LOGIN_FORM_APPEARED ->
-                    "Login form detected";
-
-            case CERTIFICATE_APPEARED ->
-                    "Certificate appeared";
-        };
-    }
-
-    private String buildMessage(
-            AlertType alertType,
-            CandidateDomain candidate,
-            RiskAssessment assessment
-    ) {
-        return String.format(
-                "Alert type: %s. Candidate: %s. Risk level: %s. Score: %d.",
-                alertType,
-                candidate.getDomain(),
-                assessment.getRiskLevel(),
-                assessment.getTotalScore()
+                Set.of(),
+                dns,
+                http,
+                UUID.randomUUID(),
+                mail,
+                Instant.now(),
+                registration,
+                screenshotHash,
+                tls,
+                certificateNames
         );
     }
 }
-Что теперь происходит
+Что теперь закрыто
 
-Например, кандидат был замечен впервые:
+Получается полноценная цепочка:
