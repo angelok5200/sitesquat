@@ -131,7 +131,8 @@ public class HttpAdapter implements WebInspector {
                 response.headers()
                         .firstValue("Content-Type")
                         .orElse(null),
-                body != null ? body.getBytes().length : 0
+                body != null ? body.getBytes().length : 0,
+                body
         );
     }
 

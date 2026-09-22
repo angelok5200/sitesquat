@@ -1,7 +1,10 @@
 package org.tafel.squating.domain.model;
 import java.time.Instant;
+import java.util.Set;
+import java.util.List;
 import java.util.UUID;
 
+import org.tafel.squating.domain.enums.ContentIndicator;
 import org.tafel.squating.domain.value.DnsSnapshot;
 import org.tafel.squating.domain.value.HttpSnapshot;
 import org.tafel.squating.domain.value.MailSnapshot;
@@ -23,7 +26,23 @@ public class DomainObservation {
     private TlsSnapshot tls;
     private MailSnapshot mail;
 
-    public DomainObservation(UUID candidateId, String contentHash, DnsSnapshot dns, HttpSnapshot http, UUID id, MailSnapshot mail, Instant observedAt, RegistrationSnapshot registration, String screenshotHash, TlsSnapshot tls) {
+    private Set<ContentIndicator> contentIndicators;
+    private List<String> certificateNames;
+
+
+    public DomainObservation(
+        UUID candidateId,
+        String contentHash,
+        Set<ContentIndicator> contentIndicators,
+        DnsSnapshot dns,
+        HttpSnapshot http,
+        UUID id,
+        MailSnapshot mail,
+        Instant observedAt,
+        RegistrationSnapshot registration,
+        String screenshotHash,
+        TlsSnapshot tls,
+        List<String> certificateNames) {
         if (candidateId == null) {
             throw new IllegalArgumentException("candidateId cannot be null");
         }
@@ -33,6 +52,8 @@ public class DomainObservation {
         if (observedAt == null) {
             throw new IllegalArgumentException("observedAt cannot be null");
         }
+        this.certificateNames = certificateNames != null ?List.copyOf(certificateNames): List.of();
+        this.contentIndicators = contentIndicators != null ?Set.copyOf(contentIndicators): Set.of();
         this.candidateId = candidateId;
         this.contentHash = contentHash;
         this.dns = dns;
@@ -43,6 +64,14 @@ public class DomainObservation {
         this.registration = registration;
         this.screenshotHash = screenshotHash;
         this.tls = tls;
+    }
+    
+    public Set<ContentIndicator> getContentIndicators() {
+        return contentIndicators;
+    }
+
+    public List<String> getCertificateNames() {
+        return certificateNames;
     }
 
     public UUID getId() {

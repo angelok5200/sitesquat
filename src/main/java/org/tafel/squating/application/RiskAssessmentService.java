@@ -16,7 +16,9 @@ public class RiskAssessmentService {
 
     private final RiskScoringService riskScoringService;
 
-    public RiskAssessmentService(RiskScoringService riskScoringService) {
+    public RiskAssessmentService(
+            RiskScoringService riskScoringService
+    ) {
         this.riskScoringService = riskScoringService;
     }
 
@@ -28,14 +30,19 @@ public class RiskAssessmentService {
             boolean recentRegistration
     ) {
         if (candidate == null) {
-            throw new IllegalArgumentException("candidate must not be null");
+            throw new IllegalArgumentException(
+                    "candidate must not be null"
+            );
         }
 
         if (observation == null) {
-            throw new IllegalArgumentException("observation must not be null");
+            throw new IllegalArgumentException(
+                    "observation must not be null"
+            );
         }
 
-        if (!candidate.getId().equals(observation.getCandidateId())) {
+        if (!candidate.getId().equals(
+                observation.getCandidateId())) {
             throw new IllegalArgumentException(
                     "Candidate id does not match observation"
             );
@@ -47,16 +54,22 @@ public class RiskAssessmentService {
             );
         }
 
-        Set<ContentIndicator> indicators = contentAnalysis != null
-                ? contentAnalysis.matchedIndicators()
-                : Set.of();
+        Set<ContentIndicator> indicators =
+                contentAnalysis != null
+                        ? contentAnalysis.matchedIndicators()
+                        : Set.of();
 
-        boolean mxConfigured = observation.getMail() != null
-                && observation.getMail().mxConfigured();
+        boolean mxConfigured =
+                observation.getMail() != null
+                        && observation.getMail().mxConfigured();
 
-        boolean certificateFound = observation.getTls() != null
-                && observation.getTls().certificateFingerprint() != null
-                && !observation.getTls().certificateFingerprint().isBlank();
+        boolean certificateFound =
+                observation.getTls() != null
+                        && observation.getTls()
+                                .certificateFingerprint() != null
+                        && !observation.getTls()
+                                .certificateFingerprint()
+                                .isBlank();
 
         return riskScoringService.calculate(
                 candidate.getId(),

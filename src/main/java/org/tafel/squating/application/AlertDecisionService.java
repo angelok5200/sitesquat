@@ -2,6 +2,7 @@ package org.tafel.squating.application;
 
 import org.springframework.stereotype.Service;
 import org.tafel.squating.domain.enums.AlertType;
+import org.tafel.squating.domain.enums.ContentIndicator;
 import org.tafel.squating.domain.enums.RiskLevel;
 import org.tafel.squating.domain.model.Alert;
 import org.tafel.squating.domain.model.CandidateDomain;
@@ -16,15 +17,14 @@ public class AlertDecisionService {
             DomainObservation previousObservation,
             DomainObservation currentObservation,
             RiskAssessment previousAssessment,
-            RiskAssessment currentAssessment,
-            boolean previousLoginFormDetected,
-            boolean currentLoginFormDetected
+            RiskAssessment currentAssessment
     ) {
         if (candidate == null) {
             throw new IllegalArgumentException(
                     "candidate must not be null"
             );
         }
+
         if (currentObservation == null) {
             throw new IllegalArgumentException(
                     "currentObservation must not be null"
@@ -37,15 +37,17 @@ public class AlertDecisionService {
             );
         }
 
-        if (!candidate.getId().equals(currentObservation.getCandidateId())) {
+        if (!candidate.getId().equals(
+                currentObservation.getCandidateId())) {
             throw new IllegalArgumentException(
-                    "Candidates Id does not match observation"
+                    "Candidate id does not match observation"
             );
         }
 
-        if (!candidate.getId().equals(currentAssessment.getCandidateId())) {
+        if (!candidate.getId().equals(
+                currentAssessment.getCandidateId())) {
             throw new IllegalArgumentException(
-                    "Candidates Id does not match assessment"
+                    "Candidate id does not match assessment"
             );
         }
 
@@ -53,9 +55,7 @@ public class AlertDecisionService {
                 previousObservation,
                 currentObservation,
                 previousAssessment,
-                currentAssessment,
-                previousLoginFormDetected,
-                currentLoginFormDetected
+                currentAssessment
         );
 
         if (alertType == null) {
@@ -82,20 +82,12 @@ public class AlertDecisionService {
             DomainObservation previousObservation,
             DomainObservation currentObservation,
             RiskAssessment previousAssessment,
-            RiskAssessment currentAssessment,
-            boolean previousLoginFormDetected,
-            boolean currentLoginFormDetected
+            RiskAssessment currentAssessment
     ) {
-        /*
-         * First discovery has the highest priority.
-         */
         if (previousObservation == null) {
             return AlertType.NEW_CANDIDATE;
         }
 
-        /*
-         * Risk escalation.
-         */
         if (isRiskEscalation(
                 previousAssessment,
                 currentAssessment
@@ -103,9 +95,6 @@ public class AlertDecisionService {
             return AlertType.RISK_ESCALATION;
         }
 
-        /*
-         * New MX configuration.
-         */
         if (mxAppeared(
                 previousObservation,
                 currentObservation
@@ -113,9 +102,6 @@ public class AlertDecisionService {
             return AlertType.MX_APPEARED;
         }
 
-        /*
-         * New certificate.
-         */
         if (certificateAppeared(
                 previousObservation,
                 currentObservation
@@ -123,19 +109,13 @@ public class AlertDecisionService {
             return AlertType.CERTIFICATE_APPEARED;
         }
 
-        /*
-         * Login form appeared.
-         *
-         * The observation model does not store content indicators,
-         * therefore this signal is supplied by Content Analysis.
-         */
-        if (!previousLoginFormDetected && currentLoginFormDetected) {
+        if (loginFormAppeared(
+                previousObservation,
+                currentObservation
+        )) {
             return AlertType.LOGIN_FORM_APPEARED;
         }
 
-        /*
-         * Content changed.
-         */
         if (contentChanged(
                 previousObservation,
                 currentObservation
@@ -188,8 +168,14 @@ public class AlertDecisionService {
             DomainObservation previousObservation,
             DomainObservation currentObservation
     ) {
+        String currentFingerprint =
+                currentObservation.getTls() != null
+                        ? currentObservation.getTls()
+                            .certificateFingerprint()
+                        : null;
 
-        if (currentObservation.getTls() == null) {
+        if (currentFingerprint == null
+                || currentFingerprint.isBlank()) {
             return false;
         }
 
@@ -197,13 +183,31 @@ public class AlertDecisionService {
             return true;
         }
 
-        String previousFingerprint = previousObservation.getTls().certificateFingerprint();
-        String currentFingerprint = currentObservation.getTls().certificateFingerprint();
+        String previousFingerprint =
+                previousObservation.getTls()
+                        .certificateFingerprint();
 
-        if (previousFingerprint == null || previousFingerprint.isBlank()) return currentFingerprint != null && !currentFingerprint.isBlank();
-        if (currentFingerprint == null || currentFingerprint.isBlank()) return false;
+        if (previousFingerprint == null
+                || previousFingerprint.isBlank()) {
+            return true;
+        }
 
-                return !previousFingerprint.equals(currentFingerprint);
+        return !previousFingerprint.equals(currentFingerprint);
+    }
+
+    private boolean loginFormAppeared(
+            DomainObservation previousObservation,
+            DomainObservation currentObservation
+    ) {
+        boolean previousLogin =
+                previousObservation.getContentIndicators()
+                        .contains(ContentIndicator.LOGIN_FORM);
+
+        boolean currentLogin =
+                currentObservation.getContentIndicators()
+                        .contains(ContentIndicator.LOGIN_FORM);
+
+        return !previousLogin && currentLogin;
     }
 
     private boolean contentChanged(

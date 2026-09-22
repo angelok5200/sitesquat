@@ -1,6 +1,8 @@
 package org.tafel.squating.application;
 
 import java.time.Instant;
+import java.util.List;
+import java.util.Set;
 import java.util.UUID;
 
 import org.springframework.stereotype.Service;
@@ -12,6 +14,7 @@ import org.tafel.squating.domain.value.MailSnapshot;
 import org.tafel.squating.domain.value.MonitoringPolicy;
 import org.tafel.squating.domain.value.RegistrationSnapshot;
 import org.tafel.squating.domain.value.TlsSnapshot;
+import org.tafel.squating.ports.outbound.CertificateDiscovery;
 import org.tafel.squating.ports.outbound.DnsInspector;
 import org.tafel.squating.ports.outbound.DomainRegistrationLookup;
 import org.tafel.squating.ports.outbound.MailInspector;
@@ -26,19 +29,22 @@ public class DomainInspectionService {
     private final WebInspector webInspector;
     private final TlsInspector tlsInspector;
     private final MailInspector mailInspector;
+    private final CertificateDiscovery certificateDiscovery;
 
     public DomainInspectionService(
             DomainRegistrationLookup registrationLookup,
             DnsInspector dnsInspector,
             WebInspector webInspector,
             TlsInspector tlsInspector,
-            MailInspector mailInspector
+            MailInspector mailInspector,
+            CertificateDiscovery certificateDiscovery
     ) {
         this.registrationLookup = registrationLookup;
         this.dnsInspector = dnsInspector;
         this.webInspector = webInspector;
         this.tlsInspector = tlsInspector;
         this.mailInspector = mailInspector;
+        this.certificateDiscovery = certificateDiscovery;
     }
 
     public DomainObservation inspect(
@@ -58,6 +64,7 @@ public class DomainInspectionService {
         HttpSnapshot http = null;
         TlsSnapshot tls = null;
         MailSnapshot mail = null;
+        List<String> certificateNames = List.of();
 
         String domain = candidate.getDomain();
 
@@ -81,9 +88,14 @@ public class DomainInspectionService {
             mail = mailInspector.inspect(domain);
         }
 
+        if (policy.checkCertificateTransparency()){
+            certificateNames = certificateDiscovery.findCertificates(domain);
+        }
+
         return new DomainObservation(
                 candidate.getId(),
                 null,
+                Set.of(),
                 dns,
                 http,
                 UUID.randomUUID(),
@@ -91,7 +103,8 @@ public class DomainInspectionService {
                 Instant.now(),
                 registration,
                 null,
-                tls
+                tls,
+                certificateNames
         );
     }
 }
