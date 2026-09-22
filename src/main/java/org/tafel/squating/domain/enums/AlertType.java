@@ -6,5 +6,6 @@ public enum AlertType{
         CONTENT_CHANGED,
         MX_APPEARED,
         LOGIN_FORM_APPEARED,
-        CERTIFICATE_APPEARED  
+        CERTIFICATE_APPEARED,
+        CERTIFICATE_REPLACED
     }

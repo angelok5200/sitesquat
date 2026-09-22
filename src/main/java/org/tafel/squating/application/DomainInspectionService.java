@@ -6,6 +6,7 @@ import java.util.Set;
 import java.util.UUID;
 
 import org.springframework.stereotype.Service;
+import org.tafel.squating.config.ApplicationProperties;
 import org.tafel.squating.domain.model.CandidateDomain;
 import org.tafel.squating.domain.model.DomainObservation;
 import org.tafel.squating.domain.value.DnsSnapshot;
@@ -18,6 +19,7 @@ import org.tafel.squating.ports.outbound.CertificateDiscovery;
 import org.tafel.squating.ports.outbound.DnsInspector;
 import org.tafel.squating.ports.outbound.DomainRegistrationLookup;
 import org.tafel.squating.ports.outbound.MailInspector;
+import org.tafel.squating.ports.outbound.ScreenshotService;
 import org.tafel.squating.ports.outbound.TlsInspector;
 import org.tafel.squating.ports.outbound.WebInspector;
 
@@ -30,6 +32,8 @@ public class DomainInspectionService {
     private final TlsInspector tlsInspector;
     private final MailInspector mailInspector;
     private final CertificateDiscovery certificateDiscovery;
+    private final ScreenshotService screenshotService;
+    private final ApplicationProperties applicationProperties;
 
     public DomainInspectionService(
             DomainRegistrationLookup registrationLookup,
@@ -37,7 +41,9 @@ public class DomainInspectionService {
             WebInspector webInspector,
             TlsInspector tlsInspector,
             MailInspector mailInspector,
-            CertificateDiscovery certificateDiscovery
+            CertificateDiscovery certificateDiscovery,
+            ScreenshotService screenshotService,
+            ApplicationProperties applicationProperties
     ) {
         this.registrationLookup = registrationLookup;
         this.dnsInspector = dnsInspector;
@@ -45,6 +51,8 @@ public class DomainInspectionService {
         this.tlsInspector = tlsInspector;
         this.mailInspector = mailInspector;
         this.certificateDiscovery = certificateDiscovery;
+        this.screenshotService = screenshotService;
+        this.applicationProperties = applicationProperties;
     }
 
     public DomainObservation inspect(
@@ -52,11 +60,15 @@ public class DomainInspectionService {
             MonitoringPolicy policy
     ) {
         if (candidate == null) {
-            throw new IllegalArgumentException("candidate must not be null");
+            throw new IllegalArgumentException(
+                    "candidate must not be null"
+            );
         }
 
         if (policy == null) {
-            throw new IllegalArgumentException("policy must not be null");
+            throw new IllegalArgumentException(
+                    "policy must not be null"
+            );
         }
 
         RegistrationSnapshot registration = null;
@@ -64,12 +76,16 @@ public class DomainInspectionService {
         HttpSnapshot http = null;
         TlsSnapshot tls = null;
         MailSnapshot mail = null;
+
         List<String> certificateNames = List.of();
+
+        String screenshotHash = null;
 
         String domain = candidate.getDomain();
 
         if (policy.checkRdap()) {
-            registration = registrationLookup.lookupRegistration(domain);
+            registration =
+                    registrationLookup.lookupRegistration(domain);
         }
 
         if (policy.checkDns()) {
@@ -88,8 +104,17 @@ public class DomainInspectionService {
             mail = mailInspector.inspect(domain);
         }
 
-        if (policy.checkCertificateTransparency()){
-            certificateNames = certificateDiscovery.findCertificates(domain);
+        if (policy.checkCertificateTransparency()) {
+            certificateNames =
+                    certificateDiscovery.findCertificates(domain);
+        }
+
+        if (policy.takeScreenshots()) {
+            screenshotHash =
+                    screenshotService.capture(
+                            domain,
+                            applicationProperties.getEvidenceDirectory()
+                    );
         }
 
         return new DomainObservation(
@@ -102,7 +127,7 @@ public class DomainInspectionService {
                 mail,
                 Instant.now(),
                 registration,
-                null,
+                screenshotHash,
                 tls,
                 certificateNames
         );

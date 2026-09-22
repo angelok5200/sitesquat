@@ -4,7 +4,6 @@ import java.util.Set;
 
 import org.springframework.stereotype.Service;
 import org.tafel.squating.analysis.ContentAnalysis;
-import org.tafel.squating.analysis.SimilarityResult;
 import org.tafel.squating.domain.enums.ContentIndicator;
 import org.tafel.squating.domain.model.CandidateDomain;
 import org.tafel.squating.domain.model.DomainObservation;
@@ -26,7 +25,6 @@ public class RiskAssessmentService {
             CandidateDomain candidate,
             DomainObservation observation,
             ContentAnalysis contentAnalysis,
-            SimilarityResult similarityResult,
             boolean recentRegistration
     ) {
         if (candidate == null) {
@@ -48,12 +46,6 @@ public class RiskAssessmentService {
             );
         }
 
-        if (similarityResult == null) {
-            throw new IllegalArgumentException(
-                    "similarityResult must not be null"
-            );
-        }
-
         Set<ContentIndicator> indicators =
                 contentAnalysis != null
                         ? contentAnalysis.matchedIndicators()
@@ -71,12 +63,16 @@ public class RiskAssessmentService {
                                 .certificateFingerprint()
                                 .isBlank();
 
+        boolean certificateTransparencyFound =
+                observation.getCertificateNames() != null
+                        && !observation.getCertificateNames().isEmpty();
+
         return riskScoringService.calculate(
                 candidate.getId(),
                 indicators,
-                similarityResult.textSimilarity(),
                 mxConfigured,
                 certificateFound,
+                certificateTransparencyFound,
                 recentRegistration
         );
     }

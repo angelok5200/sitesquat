@@ -10,9 +10,8 @@ public final class RiskRules {
     }
 
     /*
-     * Content / similarity weights
+     * Content weights
      */
-    public static final int HIGH_TEXT_SIMILARITY_WEIGHT = 20;
     public static final int BRAND_MENTIONED_WEIGHT = 15;
     public static final int LOGIN_FORM_WEIGHT = 25;
     public static final int PASSWORD_FIELD_WEIGHT = 25;
@@ -24,6 +23,7 @@ public final class RiskRules {
      */
     public static final int MX_CONFIGURED_WEIGHT = 10;
     public static final int CERTIFICATE_FOUND_WEIGHT = 10;
+    public static final int CERTIFICATE_TRANSPARENCY_WEIGHT = 15;
     public static final int RECENT_REGISTRATION_WEIGHT = 15;
 
     /*
@@ -37,8 +37,6 @@ public final class RiskRules {
     public static final int LOW_MAX_SCORE = 29;
     public static final int MEDIUM_MAX_SCORE = 59;
     public static final int HIGH_MAX_SCORE = 79;
-
-    public static final double HIGH_TEXT_SIMILARITY_THRESHOLD = 0.80;
 
     public static final Map<ContentIndicator, Integer> CONTENT_WEIGHTS = Map.of(
             ContentIndicator.BRAND_MENTIONED,

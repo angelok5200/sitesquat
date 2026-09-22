@@ -1,5 +1,8 @@
 package org.tafel.squating.application;
 
+import java.util.ArrayList;
+import java.util.List;
+
 import org.springframework.stereotype.Service;
 import org.tafel.squating.domain.enums.AlertType;
 import org.tafel.squating.domain.enums.ContentIndicator;
@@ -12,7 +15,7 @@ import org.tafel.squating.domain.model.RiskAssessment;
 @Service
 public class AlertDecisionService {
 
-    public Alert decide(
+    public List<Alert> decide(
             CandidateDomain candidate,
             DomainObservation previousObservation,
             DomainObservation currentObservation,
@@ -51,79 +54,106 @@ public class AlertDecisionService {
             );
         }
 
-        AlertType alertType = determineAlertType(
-                previousObservation,
-                currentObservation,
-                previousAssessment,
-                currentAssessment
-        );
+        List<Alert> alerts = new ArrayList<>();
 
-        if (alertType == null) {
-            return null;
-        }
-
-        return new Alert(
-                null,
-                candidate.getBrandId(),
-                candidate.getId(),
-                candidate.getDomain(),
-                alertType,
-                currentAssessment.getRiskLevel(),
-                buildTitle(alertType),
-                buildMessage(
-                        alertType,
-                        candidate,
-                        currentAssessment
-                )
-        );
-    }
-
-    private AlertType determineAlertType(
-            DomainObservation previousObservation,
-            DomainObservation currentObservation,
-            RiskAssessment previousAssessment,
-            RiskAssessment currentAssessment
-    ) {
         if (previousObservation == null) {
-            return AlertType.NEW_CANDIDATE;
+            alerts.add(createAlert(
+                    AlertType.NEW_CANDIDATE,
+                    candidate,
+                    currentAssessment
+            ));
+
+            return alerts;
         }
 
         if (isRiskEscalation(
                 previousAssessment,
                 currentAssessment
         )) {
-            return AlertType.RISK_ESCALATION;
+            alerts.add(createAlert(
+                    AlertType.RISK_ESCALATION,
+                    candidate,
+                    currentAssessment
+            ));
         }
 
         if (mxAppeared(
                 previousObservation,
                 currentObservation
         )) {
-            return AlertType.MX_APPEARED;
+            alerts.add(createAlert(
+                    AlertType.MX_APPEARED,
+                    candidate,
+                    currentAssessment
+            ));
         }
 
         if (certificateAppeared(
                 previousObservation,
                 currentObservation
         )) {
-            return AlertType.CERTIFICATE_APPEARED;
+            alerts.add(createAlert(
+                    AlertType.CERTIFICATE_APPEARED,
+                    candidate,
+                    currentAssessment
+            ));
+        }
+
+        if (certificateReplaced(
+                previousObservation,
+                currentObservation
+        )) {
+            alerts.add(createAlert(
+                    AlertType.CERTIFICATE_REPLACED,
+                    candidate,
+                    currentAssessment
+            ));
         }
 
         if (loginFormAppeared(
                 previousObservation,
                 currentObservation
         )) {
-            return AlertType.LOGIN_FORM_APPEARED;
+            alerts.add(createAlert(
+                    AlertType.LOGIN_FORM_APPEARED,
+                    candidate,
+                    currentAssessment
+            ));
         }
 
         if (contentChanged(
                 previousObservation,
                 currentObservation
         )) {
-            return AlertType.CONTENT_CHANGED;
+            alerts.add(createAlert(
+                    AlertType.CONTENT_CHANGED,
+                    candidate,
+                    currentAssessment
+            ));
         }
 
-        return null;
+        return alerts;
+    }
+
+    private Alert createAlert(
+            AlertType alertType,
+            CandidateDomain candidate,
+            RiskAssessment assessment
+    ) {
+        return new Alert(
+                null,
+                candidate.getBrandId(),
+                candidate.getId(),
+                candidate.getDomain(),
+                alertType,
+                assessment.getRiskLevel(),
+                buildTitle(alertType),
+                buildMessage(
+                        alertType,
+                        candidate,
+                        assessment
+                )
+        );
     }
 
     private boolean isRiskEscalation(
@@ -169,30 +199,52 @@ public class AlertDecisionService {
             DomainObservation currentObservation
     ) {
         String currentFingerprint =
-                currentObservation.getTls() != null
-                        ? currentObservation.getTls()
-                            .certificateFingerprint()
-                        : null;
+                getCertificateFingerprint(currentObservation);
 
-        if (currentFingerprint == null
-                || currentFingerprint.isBlank()) {
+        if (currentFingerprint == null) {
             return false;
         }
 
-        if (previousObservation.getTls() == null) {
-            return true;
-        }
-
         String previousFingerprint =
-                previousObservation.getTls()
-                        .certificateFingerprint();
+                getCertificateFingerprint(previousObservation);
+
+        return previousFingerprint == null;
+    }
+
+    private boolean certificateReplaced(
+            DomainObservation previousObservation,
+            DomainObservation currentObservation
+    ) {
+        String previousFingerprint =
+                getCertificateFingerprint(previousObservation);
+
+        String currentFingerprint =
+                getCertificateFingerprint(currentObservation);
 
         if (previousFingerprint == null
-                || previousFingerprint.isBlank()) {
-            return true;
+                || currentFingerprint == null) {
+            return false;
         }
 
         return !previousFingerprint.equals(currentFingerprint);
+    }
+
+    private String getCertificateFingerprint(
+            DomainObservation observation
+    ) {
+        if (observation == null
+                || observation.getTls() == null) {
+            return null;
+        }
+
+        String fingerprint =
+                observation.getTls().certificateFingerprint();
+
+        if (fingerprint == null || fingerprint.isBlank()) {
+            return null;
+        }
+
+        return fingerprint;
     }
 
     private boolean loginFormAppeared(
@@ -246,6 +298,9 @@ public class AlertDecisionService {
 
             case CERTIFICATE_APPEARED ->
                     "TLS certificate appeared";
+
+            case CERTIFICATE_REPLACED ->
+                    "TLS certificate replaced";
         };
     }
 

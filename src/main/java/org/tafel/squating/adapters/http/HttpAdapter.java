@@ -1,10 +1,13 @@
 package org.tafel.squating.adapters.http;
 
+import java.io.ByteArrayOutputStream;
 import java.io.IOException;
+import java.io.InputStream;
 import java.net.URI;
 import java.net.http.HttpClient;
 import java.net.http.HttpRequest;
 import java.net.http.HttpResponse;
+import java.nio.charset.StandardCharsets;
 import java.util.ArrayList;
 import java.util.List;
 import java.util.regex.Matcher;
@@ -21,6 +24,9 @@ public class HttpAdapter implements WebInspector {
             "Mozilla/5.0 (compatible; SiteSquating/1.0)";
 
     private static final int MAX_REDIRECTS = 10;
+
+    private static final int MAX_RESPONSE_SIZE_BYTES =
+            1024 * 1024;
 
     private static final Pattern TITLE_PATTERN =
             Pattern.compile(
@@ -59,10 +65,10 @@ public class HttpAdapter implements WebInspector {
                     .build();
 
             try {
-                HttpResponse<String> response =
+                HttpResponse<InputStream> response =
                         httpClient.send(
                                 request,
-                                HttpResponse.BodyHandlers.ofString()
+                                HttpResponse.BodyHandlers.ofInputStream()
                         );
 
                 int statusCode = response.statusCode();
@@ -85,6 +91,8 @@ public class HttpAdapter implements WebInspector {
 
                     redirectChain.add(nextUri.toString());
                     currentUri = nextUri;
+
+                    response.body().close();
 
                     continue;
                 }
@@ -117,11 +125,12 @@ public class HttpAdapter implements WebInspector {
     }
 
     private HttpSnapshot createSnapshot(
-            HttpResponse<String> response,
+            HttpResponse<InputStream> response,
             URI finalUri,
             List<String> redirectChain
-    ) {
-        String body = response.body();
+    ) throws IOException {
+
+        String body = readBody(response.body());
 
         return new HttpSnapshot(
                 response.statusCode(),
@@ -131,9 +140,45 @@ public class HttpAdapter implements WebInspector {
                 response.headers()
                         .firstValue("Content-Type")
                         .orElse(null),
-                body != null ? body.getBytes().length : 0,
+                body != null
+                        ? body.getBytes(StandardCharsets.UTF_8).length
+                        : 0,
                 body
         );
+    }
+
+    private String readBody(InputStream inputStream)
+            throws IOException {
+
+        if (inputStream == null) {
+            return null;
+        }
+
+        try (InputStream input = inputStream;
+             ByteArrayOutputStream output =
+                     new ByteArrayOutputStream()) {
+
+            byte[] buffer = new byte[8192];
+
+            int totalBytes = 0;
+            int bytesRead;
+
+            while ((bytesRead = input.read(buffer)) != -1) {
+                totalBytes += bytesRead;
+
+                if (totalBytes > MAX_RESPONSE_SIZE_BYTES) {
+                    throw new IllegalStateException(
+                            "HTTP response exceeds maximum allowed size of "
+                                    + MAX_RESPONSE_SIZE_BYTES
+                                    + " bytes"
+                    );
+                }
+
+                output.write(buffer, 0, bytesRead);
+            }
+
+            return output.toString(StandardCharsets.UTF_8);
+        }
     }
 
     private URI createInitialUri(String domain) {

@@ -16,9 +16,9 @@ public class RiskScoringService {
     public RiskAssessment calculate(
             UUID candidateId,
             Set<ContentIndicator> indicators,
-            double textSimilarity,
             boolean mxConfigured,
             boolean certificateFound,
+            boolean certificateTransparencyFound,
             boolean recentRegistration
     ) {
         if (candidateId == null) {
@@ -27,26 +27,9 @@ public class RiskScoringService {
             );
         }
 
-        if (textSimilarity < 0.0 || textSimilarity > 1.0) {
-            throw new IllegalArgumentException(
-                    "textSimilarity must be between 0 and 1"
-            );
-        }
-
         int score = 0;
         List<String> triggeredRules = new ArrayList<>();
 
-        /*
-         * Text similarity
-         */
-        if (textSimilarity >= RiskRules.HIGH_TEXT_SIMILARITY_THRESHOLD) {
-            score += RiskRules.HIGH_TEXT_SIMILARITY_WEIGHT;
-            triggeredRules.add("High text similarity");
-        }
-
-        /*
-         * Content indicators
-         */
         if (indicators != null) {
             for (ContentIndicator indicator : indicators) {
                 if (indicator == null) {
@@ -63,25 +46,21 @@ public class RiskScoringService {
             }
         }
 
-        /*
-         * MX
-         */
         if (mxConfigured) {
             score += RiskRules.MX_CONFIGURED_WEIGHT;
             triggeredRules.add("MX configured");
         }
 
-        /*
-         * Certificate
-         */
         if (certificateFound) {
             score += RiskRules.CERTIFICATE_FOUND_WEIGHT;
-            triggeredRules.add("Certificate found");
+            triggeredRules.add("TLS certificate found");
         }
 
-        /*
-         * Registration recency
-         */
+        if (certificateTransparencyFound) {
+            score += RiskRules.CERTIFICATE_TRANSPARENCY_WEIGHT;
+            triggeredRules.add("Certificate found in Certificate Transparency");
+        }
+
         if (recentRegistration) {
             score += RiskRules.RECENT_REGISTRATION_WEIGHT;
             triggeredRules.add("Recent registration");

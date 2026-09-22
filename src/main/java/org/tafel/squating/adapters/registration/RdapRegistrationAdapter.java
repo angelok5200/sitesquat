@@ -26,7 +26,8 @@ public class RdapRegistrationAdapter implements DomainRegistrationLookup {
 
     private final HttpClient httpClient;
     private final ObjectMapper objectMapper;
-    private final Map<String, String> rdapServers;
+
+    private volatile Map<String, String> rdapServers;
 
     public RdapRegistrationAdapter(
             HttpClient httpClient,
@@ -34,7 +35,6 @@ public class RdapRegistrationAdapter implements DomainRegistrationLookup {
     ) {
         this.httpClient = httpClient;
         this.objectMapper = objectMapper;
-        this.rdapServers = loadBootstrapServers();
     }
 
     @Override
@@ -46,7 +46,9 @@ public class RdapRegistrationAdapter implements DomainRegistrationLookup {
         String normalizedDomain = normalizeDomain(domain);
         String tld = extractTld(normalizedDomain);
 
-        String rdapServer = rdapServers.get(tld);
+        Map<String, String> servers = getRdapServers();
+
+        String rdapServer = servers.get(tld);
 
         if (rdapServer == null) {
             return new RegistrationSnapshot(
@@ -120,6 +122,25 @@ public class RdapRegistrationAdapter implements DomainRegistrationLookup {
                             + normalizedDomain,
                     e
             );
+        }
+    }
+
+    private Map<String, String> getRdapServers() {
+        Map<String, String> servers = rdapServers;
+
+        if (servers != null) {
+            return servers;
+        }
+
+        synchronized (this) {
+            servers = rdapServers;
+
+            if (servers == null) {
+                servers = loadBootstrapServers();
+                rdapServers = servers;
+            }
+
+            return servers;
         }
     }
 
@@ -277,7 +298,7 @@ public class RdapRegistrationAdapter implements DomainRegistrationLookup {
 
             try {
                 return Instant.parse(eventDate);
-            } catch (Exception ignored) {
+            } catch (java.time.format.DateTimeParseException ignored) {
                 // Invalid event date should not invalidate
                 // the complete registration response.
             }

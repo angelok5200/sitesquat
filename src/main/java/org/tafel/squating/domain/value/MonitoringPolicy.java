@@ -12,8 +12,6 @@ public record  MonitoringPolicy (
     boolean takeScreenshots,
 
     boolean analyzeContent,
-    boolean calculateSimilarity,
-
 
     int scanIntervalMinutes,
     Set<String> monitoredTlds

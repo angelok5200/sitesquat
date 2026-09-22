@@ -1,9 +1,11 @@
 package org.tafel.squating.application;
 
+import org.springframework.stereotype.Service;
 import org.tafel.squating.domain.model.CandidateDomain;
 import org.tafel.squating.domain.value.RegistrationSnapshot;
 import org.tafel.squating.ports.outbound.DomainRegistrationLookup;
 
+@Service 
 public class RegistrationDiscoveryService {
     
     private final DomainRegistrationLookup registrationLookup;

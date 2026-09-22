@@ -1,13 +1,18 @@
 package org.tafel.squating.adapters.tls;
 
+import java.io.IOException;
 import java.net.SocketTimeoutException;
 import java.security.MessageDigest;
+import java.security.NoSuchAlgorithmException;
 import java.security.cert.Certificate;
+import java.security.cert.CertificateEncodingException;
+import java.security.cert.CertificateParsingException;
 import java.security.cert.X509Certificate;
 import java.util.ArrayList;
 import java.util.Collection;
 import java.util.List;
 
+import javax.net.ssl.SSLHandshakeException;
 import javax.net.ssl.SSLSocket;
 import javax.net.ssl.SSLSocketFactory;
 
@@ -19,7 +24,7 @@ import org.tafel.squating.ports.outbound.TlsInspector;
 public class TlsAdapter implements TlsInspector {
 
     private static final int HTTPS_PORT = 443;
-    private static final int CONNECT_TIMEOUT_MILLIS = 5000;
+    private static final int SOCKET_TIMEOUT_MILLIS = 5000;
 
     @Override
     public TlsSnapshot inspect(String domain) {
@@ -30,7 +35,7 @@ public class TlsAdapter implements TlsInspector {
         String normalizedDomain = normalizeDomain(domain);
 
         try (SSLSocket socket = createSocket(normalizedDomain)) {
-            socket.setSoTimeout(CONNECT_TIMEOUT_MILLIS);
+            socket.setSoTimeout(SOCKET_TIMEOUT_MILLIS);
 
             socket.startHandshake();
 
@@ -54,24 +59,24 @@ public class TlsAdapter implements TlsInspector {
         } catch (SocketTimeoutException e) {
             return emptySnapshot();
 
-        } catch (Exception e) {
+        } catch (SSLHandshakeException e) {
+            return emptySnapshot();
+
+        } catch (IOException e) {
             return emptySnapshot();
         }
     }
 
-    private SSLSocket createSocket(String domain) throws Exception {
+    private SSLSocket createSocket(String domain)
+            throws IOException {
+
         SSLSocketFactory factory =
                 (SSLSocketFactory) SSLSocketFactory.getDefault();
 
-        SSLSocket socket =
-                (SSLSocket) factory.createSocket();
-
-        socket.connect(
-                new java.net.InetSocketAddress(domain, HTTPS_PORT),
-                CONNECT_TIMEOUT_MILLIS
+        return (SSLSocket) factory.createSocket(
+                domain,
+                HTTPS_PORT
         );
-
-        return socket;
     }
 
     private List<String> extractSubjectAlternativeNames(
@@ -100,18 +105,22 @@ public class TlsAdapter implements TlsInspector {
             }
 
             return result;
-        } catch (Exception e) {
+
+        } catch (CertificateParsingException e) {
             return List.of();
         }
     }
 
     private String calculateFingerprint(
-            X509Certificate certificate
-    ) throws Exception {
+        X509Certificate certificate
+) {
+    try {
         MessageDigest digest =
                 MessageDigest.getInstance("SHA-256");
 
-        byte[] hash = digest.digest(certificate.getEncoded());
+        byte[] hash = digest.digest(
+                certificate.getEncoded()
+        );
 
         StringBuilder result = new StringBuilder();
 
@@ -124,13 +133,27 @@ public class TlsAdapter implements TlsInspector {
         }
 
         return result.toString();
+
+    } catch (NoSuchAlgorithmException e) {
+        throw new IllegalStateException(
+                "SHA-256 algorithm is not available",
+                e
+        );
+
+    } catch (CertificateEncodingException e) {
+        throw new IllegalStateException(
+                "Unable to encode TLS certificate",
+                e
+        );
     }
+}
 
     private String normalizeDomain(String domain) {
         String normalized = domain.trim().toLowerCase();
 
         if (normalized.startsWith("https://")) {
             normalized = normalized.substring(8);
+
         } else if (normalized.startsWith("http://")) {
             normalized = normalized.substring(7);
         }
@@ -138,7 +161,10 @@ public class TlsAdapter implements TlsInspector {
         int slashIndex = normalized.indexOf('/');
 
         if (slashIndex >= 0) {
-            normalized = normalized.substring(0, slashIndex);
+            normalized = normalized.substring(
+                    0,
+                    slashIndex
+            );
         }
 
         return normalized;

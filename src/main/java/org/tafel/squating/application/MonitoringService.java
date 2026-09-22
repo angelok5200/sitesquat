@@ -3,11 +3,12 @@ package org.tafel.squating.application;
 import java.nio.charset.StandardCharsets;
 import java.security.MessageDigest;
 import java.security.NoSuchAlgorithmException;
+import java.util.List;
 import java.util.Set;
 
 import org.springframework.stereotype.Service;
 import org.tafel.squating.analysis.ContentAnalysis;
-import org.tafel.squating.analysis.SimilarityResult;
+import org.tafel.squating.domain.enums.ContentIndicator;
 import org.tafel.squating.domain.model.Alert;
 import org.tafel.squating.domain.model.Brand;
 import org.tafel.squating.domain.model.CandidateDomain;
@@ -19,10 +20,7 @@ import org.tafel.squating.ports.outbound.AlertRepository;
 import org.tafel.squating.ports.outbound.BrandRepository;
 import org.tafel.squating.ports.outbound.ContentAnalyser;
 import org.tafel.squating.ports.outbound.ObservationRepository;
-import org.tafel.squating.ports.outbound.SimilarityAnalyzer;
 import org.tafel.squating.ports.outbound.RiskAssessmentRepository;
-import org.tafel.squating.ports.outbound.WebInspector;
-import org.tafel.squating.domain.enums.ContentIndicator;
 
 @Service
 public class MonitoringService {
@@ -33,8 +31,6 @@ public class MonitoringService {
 
     private final BrandRepository brandRepository;
     private final ContentAnalyser contentAnalyser;
-    private final SimilarityAnalyzer similarityAnalyzer;
-    private final WebInspector webInspector;
 
     private final ObservationRepository observationRepository;
     private final RiskAssessmentRepository riskAssessmentRepository;
@@ -46,8 +42,6 @@ public class MonitoringService {
             AlertDecisionService alertDecisionService,
             BrandRepository brandRepository,
             ContentAnalyser contentAnalyser,
-            SimilarityAnalyzer similarityAnalyzer,
-            WebInspector webInspector,
             ObservationRepository observationRepository,
             RiskAssessmentRepository riskAssessmentRepository,
             AlertRepository alertRepository
@@ -57,30 +51,33 @@ public class MonitoringService {
         this.alertDecisionService = alertDecisionService;
         this.brandRepository = brandRepository;
         this.contentAnalyser = contentAnalyser;
-        this.similarityAnalyzer = similarityAnalyzer;
-        this.webInspector = webInspector;
         this.observationRepository = observationRepository;
         this.riskAssessmentRepository = riskAssessmentRepository;
         this.alertRepository = alertRepository;
     }
 
-    public Alert monitor(
+    public List<Alert> monitor(
             CandidateDomain candidate,
             MonitoringPolicy policy,
             boolean recentRegistration
     ) {
         if (candidate == null) {
-            throw new IllegalArgumentException("candidate must not be null");
+            throw new IllegalArgumentException(
+                    "candidate must not be null"
+            );
         }
 
         if (policy == null) {
-            throw new IllegalArgumentException("policy must not be null");
+            throw new IllegalArgumentException(
+                    "policy must not be null"
+            );
         }
 
         Brand brand = brandRepository.findById(candidate.getBrandId())
                 .orElseThrow(() ->
                         new IllegalArgumentException(
-                                "Brand not found: " + candidate.getBrandId()
+                                "Brand not found: "
+                                        + candidate.getBrandId()
                         )
                 );
 
@@ -95,16 +92,15 @@ public class MonitoringService {
                         .orElse(null);
 
         DomainObservation currentObservation =
-                domainInspectionService.inspect(candidate, policy);
+                domainInspectionService.inspect(
+                        candidate,
+                        policy
+                );
 
         ContentAnalysis contentAnalysis =
-                analyseContent(candidate, brand, currentObservation, policy);
-
-        SimilarityResult similarityResult =
-                calculateSimilarity(
+                analyseContent(
                         brand,
                         currentObservation,
-                        contentAnalysis,
                         policy
                 );
 
@@ -119,30 +115,31 @@ public class MonitoringService {
                         candidate,
                         enrichedObservation,
                         contentAnalysis,
-                        similarityResult,
                         recentRegistration
                 );
 
         observationRepository.save(enrichedObservation);
         riskAssessmentRepository.save(currentAssessment);
 
-        Alert alert = alertDecisionService.decide(
-                candidate,
-                previousObservation,
-                enrichedObservation,
-                previousAssessment,
-                currentAssessment
-        );
+        List<Alert> alerts =
+                alertDecisionService.decide(
+                        candidate,
+                        previousObservation,
+                        enrichedObservation,
+                        previousAssessment,
+                        currentAssessment
+                );
 
-        if (alert != null) {
-            return alertRepository.save(alert);
+        if (alerts.isEmpty()) {
+            return List.of();
         }
 
-        return null;
+        return alerts.stream()
+                .map(alertRepository::save)
+                .toList();
     }
 
     private ContentAnalysis analyseContent(
-            CandidateDomain candidate,
             Brand brand,
             DomainObservation observation,
             MonitoringPolicy policy
@@ -153,60 +150,15 @@ public class MonitoringService {
 
         HttpSnapshot http = observation.getHttp();
 
-        if (http == null || http.body() == null || http.body().isBlank()) {
+        if (http == null
+                || http.body() == null
+                || http.body().isBlank()) {
             return null;
         }
 
         return contentAnalyser.analyse(
                 http.body(),
                 brand.getName()
-        );
-    }
-
-    private SimilarityResult calculateSimilarity(
-            Brand brand,
-            DomainObservation observation,
-            ContentAnalysis contentAnalysis,
-            MonitoringPolicy policy
-    ) {
-        if (!policy.calculateSimilarity()) {
-            return emptySimilarityResult();
-        }
-
-        HttpSnapshot candidateHttp = observation.getHttp();
-
-        if (candidateHttp == null || candidateHttp.body() == null) {
-            return emptySimilarityResult();
-        }
-
-        if (brand.getReferenceUrl() == null
-                || brand.getReferenceUrl().isBlank()) {
-            return emptySimilarityResult();
-        }
-
-        HttpSnapshot referenceHttp =
-                webInspector.inspect(brand.getReferenceUrl());
-
-        String candidateText = candidateHttp.body();
-        String referenceText = referenceHttp != null
-                ? referenceHttp.body()
-                : null;
-
-        return similarityAnalyzer.analyze(
-                candidateText,
-                referenceText,
-                null,
-                null,
-                null,
-                null
-        );
-    }
-
-    private SimilarityResult emptySimilarityResult() {
-        return new SimilarityResult(
-                0.0,
-                0.0,
-                false
         );
     }
 
@@ -223,6 +175,7 @@ public class MonitoringService {
 
         if (observation.getHttp() != null
                 && observation.getHttp().body() != null) {
+
             contentHash = sha256(
                     observation.getHttp().body()
             );
