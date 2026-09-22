@@ -1,157 +1,545 @@
-1. Реализация ScreenshotService
+Здесь полностью убираем determineAlertType(). Вместо него собираем список.
 
-Создаём PlaywrightScreenshotAdapter в adapters/screenshot.
+AlertDecisionService.java
+package org.tafel.squating.application;
 
-Он будет:
+import java.util.ArrayList;
+import java.util.List;
 
-создавать outputDirectory, если его нет;
-открывать https://domain;
-делать screenshot;
-сохранять domain-timestamp.png;
-считать SHA-256 содержимого самого PNG;
-возвращать этот hash;
-закрывать browser/context/playwright даже при ошибке.
-PlaywrightScreenshotAdapter.java
-package org.tafel.squating.adapters.screenshot;
+import org.springframework.stereotype.Service;
+import org.tafel.squating.domain.enums.AlertType;
+import org.tafel.squating.domain.enums.ContentIndicator;
+import org.tafel.squating.domain.enums.RiskLevel;
+import org.tafel.squating.domain.model.Alert;
+import org.tafel.squating.domain.model.CandidateDomain;
+import org.tafel.squating.domain.model.DomainObservation;
+import org.tafel.squating.domain.model.RiskAssessment;
 
-import com.microsoft.playwright.Browser;
-import com.microsoft.playwright.BrowserType;
-import com.microsoft.playwright.Page;
-import com.microsoft.playwright.Playwright;
-import com.microsoft.playwright.options.WaitUntilState;
-import org.springframework.stereotype.Component;
-import org.tafel.squating.ports.outbound.ScreenshotService;
+@Service
+public class AlertDecisionService {
 
-import java.io.IOException;
-import java.nio.file.Files;
-import java.nio.file.Path;
-import java.nio.file.StandardOpenOption;
-import java.security.MessageDigest;
-import java.security.NoSuchAlgorithmException;
-import java.time.Instant;
-
-@Component
-public class PlaywrightScreenshotAdapter implements ScreenshotService {
-
-    private static final int NAVIGATION_TIMEOUT_MILLIS = 10_000;
-
-    @Override
-    public String capture(
-            String domain,
-            String outputDirectory
+    public List<Alert> decide(
+            CandidateDomain candidate,
+            DomainObservation previousObservation,
+            DomainObservation currentObservation,
+            RiskAssessment previousAssessment,
+            RiskAssessment currentAssessment
     ) {
-        if (domain == null || domain.isBlank()) {
+        if (candidate == null) {
             throw new IllegalArgumentException(
-                    "domain must not be blank"
+                    "candidate must not be null"
             );
         }
 
-        if (outputDirectory == null || outputDirectory.isBlank()) {
+        if (currentObservation == null) {
             throw new IllegalArgumentException(
-                    "outputDirectory must not be blank"
+                    "currentObservation must not be null"
             );
         }
 
-        String normalizedDomain = normalizeDomain(domain);
-
-        Path directory = Path.of(outputDirectory);
-
-        try {
-            Files.createDirectories(directory);
-
-            String fileName =
-                    sanitizeFileName(normalizedDomain)
-                            + "-"
-                            + Instant.now().toEpochMilli()
-                            + ".png";
-
-            Path screenshotPath = directory.resolve(fileName);
-
-            byte[] screenshotBytes;
-
-            try (Playwright playwright = Playwright.create();
-                 Browser browser = playwright.chromium().launch(
-                         new BrowserType.LaunchOptions()
-                                 .setHeadless(true)
-                 )) {
-
-                Page page = browser.newPage();
-
-                page.setDefaultNavigationTimeout(
-                        NAVIGATION_TIMEOUT_MILLIS
-                );
-
-                page.navigate(
-                        "https://" + normalizedDomain,
-                        new Page.NavigateOptions()
-                                .setWaitUntil(
-                                        WaitUntilState.DOMCONTENTLOADED
-                                )
-                );
-
-                screenshotBytes = page.screenshot(
-                        new Page.ScreenshotOptions()
-                                .setPath(screenshotPath)
-                                .setFullPage(true)
-                );
-            }
-
-            return calculateSha256(screenshotBytes);
-
-        } catch (IOException e) {
-            throw new IllegalStateException(
-                    "Unable to save screenshot for "
-                            + normalizedDomain,
-                    e
+        if (currentAssessment == null) {
+            throw new IllegalArgumentException(
+                    "currentAssessment must not be null"
             );
         }
+
+        if (!candidate.getId().equals(
+                currentObservation.getCandidateId())) {
+            throw new IllegalArgumentException(
+                    "Candidate id does not match observation"
+            );
+        }
+
+        if (!candidate.getId().equals(
+                currentAssessment.getCandidateId())) {
+            throw new IllegalArgumentException(
+                    "Candidate id does not match assessment"
+            );
+        }
+
+        List<Alert> alerts = new ArrayList<>();
+
+        if (previousObservation == null) {
+            alerts.add(createAlert(
+                    AlertType.NEW_CANDIDATE,
+                    candidate,
+                    currentAssessment
+            ));
+
+            return alerts;
+        }
+
+        if (isRiskEscalation(
+                previousAssessment,
+                currentAssessment
+        )) {
+            alerts.add(createAlert(
+                    AlertType.RISK_ESCALATION,
+                    candidate,
+                    currentAssessment
+            ));
+        }
+
+        if (mxAppeared(
+                previousObservation,
+                currentObservation
+        )) {
+            alerts.add(createAlert(
+                    AlertType.MX_APPEARED,
+                    candidate,
+                    currentAssessment
+            ));
+        }
+
+        if (certificateAppeared(
+                previousObservation,
+                currentObservation
+        )) {
+            alerts.add(createAlert(
+                    AlertType.CERTIFICATE_APPEARED,
+                    candidate,
+                    currentAssessment
+            ));
+        }
+
+        if (certificateReplaced(
+                previousObservation,
+                currentObservation
+        )) {
+            alerts.add(createAlert(
+                    AlertType.CERTIFICATE_REPLACED,
+                    candidate,
+                    currentAssessment
+            ));
+        }
+
+        if (loginFormAppeared(
+                previousObservation,
+                currentObservation
+        )) {
+            alerts.add(createAlert(
+                    AlertType.LOGIN_FORM_APPEARED,
+                    candidate,
+                    currentAssessment
+            ));
+        }
+
+        if (contentChanged(
+                previousObservation,
+                currentObservation
+        )) {
+            alerts.add(createAlert(
+                    AlertType.CONTENT_CHANGED,
+                    candidate,
+                    currentAssessment
+            ));
+        }
+
+        return alerts;
     }
 
-    private String normalizeDomain(String domain) {
-        String normalized = domain.trim().toLowerCase();
-
-        if (normalized.startsWith("https://")) {
-            normalized = normalized.substring(8);
-        } else if (normalized.startsWith("http://")) {
-            normalized = normalized.substring(7);
-        }
-
-        int slashIndex = normalized.indexOf('/');
-
-        if (slashIndex >= 0) {
-            normalized = normalized.substring(
-                    0,
-                    slashIndex
-            );
-        }
-
-        return normalized;
-    }
-
-    private String sanitizeFileName(String domain) {
-        return domain.replaceAll(
-                "[^a-zA-Z0-9.-]",
-                "_"
+    private Alert createAlert(
+            AlertType alertType,
+            CandidateDomain candidate,
+            RiskAssessment assessment
+    ) {
+        return new Alert(
+                null,
+                candidate.getBrandId(),
+                candidate.getId(),
+                candidate.getDomain(),
+                alertType,
+                assessment.getRiskLevel(),
+                buildTitle(alertType),
+                buildMessage(
+                        alertType,
+                        candidate,
+                        assessment
+                )
         );
     }
 
-    private String calculateSha256(byte[] data) {
+    private boolean isRiskEscalation(
+            RiskAssessment previousAssessment,
+            RiskAssessment currentAssessment
+    ) {
+        if (previousAssessment == null
+                || previousAssessment.getRiskLevel() == null
+                || currentAssessment.getRiskLevel() == null) {
+            return false;
+        }
+
+        RiskLevel previousLevel =
+                previousAssessment.getRiskLevel();
+
+        RiskLevel currentLevel =
+                currentAssessment.getRiskLevel();
+
+        return (previousLevel == RiskLevel.MEDIUM
+                    && currentLevel == RiskLevel.HIGH)
+                || (previousLevel == RiskLevel.HIGH
+                    && currentLevel == RiskLevel.CRITICAL);
+    }
+
+    private boolean mxAppeared(
+            DomainObservation previousObservation,
+            DomainObservation currentObservation
+    ) {
+        if (currentObservation.getMail() == null
+                || !currentObservation.getMail().mxConfigured()) {
+            return false;
+        }
+
+        if (previousObservation.getMail() == null) {
+            return true;
+        }
+
+        return !previousObservation.getMail().mxConfigured();
+    }
+
+    private boolean certificateAppeared(
+            DomainObservation previousObservation,
+            DomainObservation currentObservation
+    ) {
+        String currentFingerprint =
+                getCertificateFingerprint(currentObservation);
+
+        if (currentFingerprint == null) {
+            return false;
+        }
+
+        String previousFingerprint =
+                getCertificateFingerprint(previousObservation);
+
+        return previousFingerprint == null;
+    }
+
+    private boolean certificateReplaced(
+            DomainObservation previousObservation,
+            DomainObservation currentObservation
+    ) {
+        String previousFingerprint =
+                getCertificateFingerprint(previousObservation);
+
+        String currentFingerprint =
+                getCertificateFingerprint(currentObservation);
+
+        if (previousFingerprint == null
+                || currentFingerprint == null) {
+            return false;
+        }
+
+        return !previousFingerprint.equals(currentFingerprint);
+    }
+
+    private String getCertificateFingerprint(
+            DomainObservation observation
+    ) {
+        if (observation == null
+                || observation.getTls() == null) {
+            return null;
+        }
+
+        String fingerprint =
+                observation.getTls().certificateFingerprint();
+
+        if (fingerprint == null || fingerprint.isBlank()) {
+            return null;
+        }
+
+        return fingerprint;
+    }
+
+    private boolean loginFormAppeared(
+            DomainObservation previousObservation,
+            DomainObservation currentObservation
+    ) {
+        boolean previousLogin =
+                previousObservation.getContentIndicators()
+                        .contains(ContentIndicator.LOGIN_FORM);
+
+        boolean currentLogin =
+                currentObservation.getContentIndicators()
+                        .contains(ContentIndicator.LOGIN_FORM);
+
+        return !previousLogin && currentLogin;
+    }
+
+    private boolean contentChanged(
+            DomainObservation previousObservation,
+            DomainObservation currentObservation
+    ) {
+        String previousHash =
+                previousObservation.getContentHash();
+
+        String currentHash =
+                currentObservation.getContentHash();
+
+        if (previousHash == null || currentHash == null) {
+            return false;
+        }
+
+        return !previousHash.equals(currentHash);
+    }
+
+    private String buildTitle(AlertType alertType) {
+        return switch (alertType) {
+            case NEW_CANDIDATE ->
+                    "New suspicious candidate detected";
+
+            case RISK_ESCALATION ->
+                    "Risk level escalated";
+
+            case CONTENT_CHANGED ->
+                    "Candidate content changed";
+
+            case MX_APPEARED ->
+                    "Mail configuration appeared";
+
+            case LOGIN_FORM_APPEARED ->
+                    "Login form detected";
+
+            case CERTIFICATE_APPEARED ->
+                    "TLS certificate appeared";
+
+            case CERTIFICATE_REPLACED ->
+                    "TLS certificate replaced";
+        };
+    }
+
+    private String buildMessage(
+            AlertType alertType,
+            CandidateDomain candidate,
+            RiskAssessment assessment
+    ) {
+        return String.format(
+                "Alert type: %s. Candidate: %s. Risk level: %s. Score: %d.",
+                alertType,
+                candidate.getDomain(),
+                assessment.getRiskLevel(),
+                assessment.getTotalScore()
+        );
+    }
+}
+Что теперь происходит
+
+
+
+Similarity здесь не возвращаем и не добавляем.
+MonitoringService.java
+package org.tafel.squating.application;
+
+import java.nio.charset.StandardCharsets;
+import java.security.MessageDigest;
+import java.security.NoSuchAlgorithmException;
+import java.util.List;
+import java.util.Set;
+
+import org.springframework.stereotype.Service;
+import org.tafel.squating.analysis.ContentAnalysis;
+import org.tafel.squating.domain.enums.ContentIndicator;
+import org.tafel.squating.domain.model.Alert;
+import org.tafel.squating.domain.model.Brand;
+import org.tafel.squating.domain.model.CandidateDomain;
+import org.tafel.squating.domain.model.DomainObservation;
+import org.tafel.squating.domain.model.RiskAssessment;
+import org.tafel.squating.domain.value.HttpSnapshot;
+import org.tafel.squating.domain.value.MonitoringPolicy;
+import org.tafel.squating.ports.outbound.AlertRepository;
+import org.tafel.squating.ports.outbound.BrandRepository;
+import org.tafel.squating.ports.outbound.ContentAnalyser;
+import org.tafel.squating.ports.outbound.ObservationRepository;
+import org.tafel.squating.ports.outbound.RiskAssessmentRepository;
+
+@Service
+public class MonitoringService {
+
+    private final DomainInspectionService domainInspectionService;
+    private final RiskAssessmentService riskAssessmentService;
+    private final AlertDecisionService alertDecisionService;
+
+    private final BrandRepository brandRepository;
+    private final ContentAnalyser contentAnalyser;
+
+    private final ObservationRepository observationRepository;
+    private final RiskAssessmentRepository riskAssessmentRepository;
+    private final AlertRepository alertRepository;
+
+    public MonitoringService(
+            DomainInspectionService domainInspectionService,
+            RiskAssessmentService riskAssessmentService,
+            AlertDecisionService alertDecisionService,
+            BrandRepository brandRepository,
+            ContentAnalyser contentAnalyser,
+            ObservationRepository observationRepository,
+            RiskAssessmentRepository riskAssessmentRepository,
+            AlertRepository alertRepository
+    ) {
+        this.domainInspectionService = domainInspectionService;
+        this.riskAssessmentService = riskAssessmentService;
+        this.alertDecisionService = alertDecisionService;
+        this.brandRepository = brandRepository;
+        this.contentAnalyser = contentAnalyser;
+        this.observationRepository = observationRepository;
+        this.riskAssessmentRepository = riskAssessmentRepository;
+        this.alertRepository = alertRepository;
+    }
+
+    public List<Alert> monitor(
+            CandidateDomain candidate,
+            MonitoringPolicy policy,
+            boolean recentRegistration
+    ) {
+        if (candidate == null) {
+            throw new IllegalArgumentException(
+                    "candidate must not be null"
+            );
+        }
+
+        if (policy == null) {
+            throw new IllegalArgumentException(
+                    "policy must not be null"
+            );
+        }
+
+        Brand brand = brandRepository.findById(candidate.getBrandId())
+                .orElseThrow(() ->
+                        new IllegalArgumentException(
+                                "Brand not found: "
+                                        + candidate.getBrandId()
+                        )
+                );
+
+        DomainObservation previousObservation =
+                observationRepository
+                        .findLatestByCandidateId(candidate.getId())
+                        .orElse(null);
+
+        RiskAssessment previousAssessment =
+                riskAssessmentRepository
+                        .findLatestByCandidateId(candidate.getId())
+                        .orElse(null);
+
+        DomainObservation currentObservation =
+                domainInspectionService.inspect(
+                        candidate,
+                        policy
+                );
+
+        ContentAnalysis contentAnalysis =
+                analyseContent(
+                        brand,
+                        currentObservation,
+                        policy
+                );
+
+        DomainObservation enrichedObservation =
+                enrichObservation(
+                        currentObservation,
+                        contentAnalysis
+                );
+
+        RiskAssessment currentAssessment =
+                riskAssessmentService.assess(
+                        candidate,
+                        enrichedObservation,
+                        contentAnalysis,
+                        recentRegistration
+                );
+
+        observationRepository.save(enrichedObservation);
+        riskAssessmentRepository.save(currentAssessment);
+
+        List<Alert> alerts =
+                alertDecisionService.decide(
+                        candidate,
+                        previousObservation,
+                        enrichedObservation,
+                        previousAssessment,
+                        currentAssessment
+                );
+
+        if (alerts.isEmpty()) {
+            return List.of();
+        }
+
+        return alerts.stream()
+                .map(alertRepository::save)
+                .toList();
+    }
+
+    private ContentAnalysis analyseContent(
+            Brand brand,
+            DomainObservation observation,
+            MonitoringPolicy policy
+    ) {
+        if (!policy.analyzeContent()) {
+            return null;
+        }
+
+        HttpSnapshot http = observation.getHttp();
+
+        if (http == null
+                || http.body() == null
+                || http.body().isBlank()) {
+            return null;
+        }
+
+        return contentAnalyser.analyse(
+                http.body(),
+                brand.getName()
+        );
+    }
+
+    private DomainObservation enrichObservation(
+            DomainObservation observation,
+            ContentAnalysis contentAnalysis
+    ) {
+        Set<ContentIndicator> indicators =
+                contentAnalysis != null
+                        ? contentAnalysis.matchedIndicators()
+                        : Set.of();
+
+        String contentHash = null;
+
+        if (observation.getHttp() != null
+                && observation.getHttp().body() != null) {
+
+            contentHash = sha256(
+                    observation.getHttp().body()
+            );
+        }
+
+        return new DomainObservation(
+                observation.getCandidateId(),
+                contentHash,
+                indicators,
+                observation.getDns(),
+                observation.getHttp(),
+                observation.getId(),
+                observation.getMail(),
+                observation.getObservedAt(),
+                observation.getRegistration(),
+                observation.getScreenshotHash(),
+                observation.getTls(),
+                observation.getCertificateNames()
+        );
+    }
+
+    private String sha256(String value) {
         try {
             MessageDigest digest =
                     MessageDigest.getInstance("SHA-256");
 
-            byte[] hash = digest.digest(data);
+            byte[] hash = digest.digest(
+                    value.getBytes(StandardCharsets.UTF_8)
+            );
 
-            StringBuilder result =
-                    new StringBuilder();
+            StringBuilder result = new StringBuilder();
 
-            for (byte value : hash) {
-                if (!result.isEmpty()) {
-                    result.append(':');
-                }
-
+            for (byte b : hash) {
                 result.append(
-                        String.format("%02X", value)
+                        String.format("%02x", b)
                 );
             }
 
@@ -166,186 +554,6 @@ public class PlaywrightScreenshotAdapter implements ScreenshotService {
     }
 }
 
-Здесь важный момент: page.screenshot(...setPath(...)) одновременно сохраняет файл, а возвращаемый byte[] — это те же PNG-данные, поэтому hash считается именно от screenshot, а не от HTML или имени файла.
+Теперь цепочка такая:
 
-2. Добавляем Playwright dependency
-
-В pom.xml:
-
-pom.xml — Playwright dependency
-<dependency>
-    <groupId>com.microsoft.playwright</groupId>
-    <artifactId>playwright</artifactId>
-    <version>1.55.0</version>
-</dependency>
-
-После первого запуска Playwright также потребует Chromium. Java dependency сама по себе не означает, что браузер уже установлен.
-
-Для Maven-проекта после dependency можно установить browser binary командой:
-
-mvn exec:java \
-  -Dexec.mainClass=com.microsoft.playwright.CLI \
-  -Dexec.args="install chromium"
-3. Подключаем ScreenshotService к DomainInspectionService
-
-Сейчас DomainInspectionService его вообще не знает.
-
-Добавляем:
-
-private final ScreenshotService screenshotService;
-private final ApplicationProperties applicationProperties;
-
-И в inspect():
-
-String screenshotHash = null;
-
-if (policy.takeScreenshots()) {
-    screenshotHash = screenshotService.capture(
-            domain,
-            applicationProperties.getEvidenceDirectory()
-    );
-}
-
-После этого передаём screenshotHash в DomainObservation.
-
-Полная версия:
-
-DomainInspectionService.java
-package org.tafel.squating.application;
-
-import java.time.Instant;
-import java.util.List;
-import java.util.Set;
-import java.util.UUID;
-
-import org.springframework.stereotype.Service;
-import org.tafel.squating.config.ApplicationProperties;
-import org.tafel.squating.domain.model.CandidateDomain;
-import org.tafel.squating.domain.model.DomainObservation;
-import org.tafel.squating.domain.value.DnsSnapshot;
-import org.tafel.squating.domain.value.HttpSnapshot;
-import org.tafel.squating.domain.value.MailSnapshot;
-import org.tafel.squating.domain.value.MonitoringPolicy;
-import org.tafel.squating.domain.value.RegistrationSnapshot;
-import org.tafel.squating.domain.value.TlsSnapshot;
-import org.tafel.squating.ports.outbound.CertificateDiscovery;
-import org.tafel.squating.ports.outbound.DnsInspector;
-import org.tafel.squating.ports.outbound.DomainRegistrationLookup;
-import org.tafel.squating.ports.outbound.MailInspector;
-import org.tafel.squating.ports.outbound.ScreenshotService;
-import org.tafel.squating.ports.outbound.TlsInspector;
-import org.tafel.squating.ports.outbound.WebInspector;
-
-@Service
-public class DomainInspectionService {
-
-    private final DomainRegistrationLookup registrationLookup;
-    private final DnsInspector dnsInspector;
-    private final WebInspector webInspector;
-    private final TlsInspector tlsInspector;
-    private final MailInspector mailInspector;
-    private final CertificateDiscovery certificateDiscovery;
-    private final ScreenshotService screenshotService;
-    private final ApplicationProperties applicationProperties;
-
-    public DomainInspectionService(
-            DomainRegistrationLookup registrationLookup,
-            DnsInspector dnsInspector,
-            WebInspector webInspector,
-            TlsInspector tlsInspector,
-            MailInspector mailInspector,
-            CertificateDiscovery certificateDiscovery,
-            ScreenshotService screenshotService,
-            ApplicationProperties applicationProperties
-    ) {
-        this.registrationLookup = registrationLookup;
-        this.dnsInspector = dnsInspector;
-        this.webInspector = webInspector;
-        this.tlsInspector = tlsInspector;
-        this.mailInspector = mailInspector;
-        this.certificateDiscovery = certificateDiscovery;
-        this.screenshotService = screenshotService;
-        this.applicationProperties = applicationProperties;
-    }
-
-    public DomainObservation inspect(
-            CandidateDomain candidate,
-            MonitoringPolicy policy
-    ) {
-        if (candidate == null) {
-            throw new IllegalArgumentException(
-                    "candidate must not be null"
-            );
-        }
-
-        if (policy == null) {
-            throw new IllegalArgumentException(
-                    "policy must not be null"
-            );
-        }
-
-        RegistrationSnapshot registration = null;
-        DnsSnapshot dns = null;
-        HttpSnapshot http = null;
-        TlsSnapshot tls = null;
-        MailSnapshot mail = null;
-
-        List<String> certificateNames = List.of();
-
-        String screenshotHash = null;
-
-        String domain = candidate.getDomain();
-
-        if (policy.checkRdap()) {
-            registration =
-                    registrationLookup.lookupRegistration(domain);
-        }
-
-        if (policy.checkDns()) {
-            dns = dnsInspector.inspect(domain);
-        }
-
-        if (policy.checkHttp()) {
-            http = webInspector.inspect(domain);
-        }
-
-        if (policy.checkTls()) {
-            tls = tlsInspector.inspect(domain);
-        }
-
-        if (policy.checkMx()) {
-            mail = mailInspector.inspect(domain);
-        }
-
-        if (policy.checkCertificateTransparency()) {
-            certificateNames =
-                    certificateDiscovery.findCertificates(domain);
-        }
-
-        if (policy.takeScreenshots()) {
-            screenshotHash =
-                    screenshotService.capture(
-                            domain,
-                            applicationProperties.getEvidenceDirectory()
-                    );
-        }
-
-        return new DomainObservation(
-                candidate.getId(),
-                null,
-                Set.of(),
-                dns,
-                http,
-                UUID.randomUUID(),
-                mail,
-                Instant.now(),
-                registration,
-                screenshotHash,
-                tls,
-                certificateNames
-        );
-    }
-}
-Что теперь закрыто
-
-Получается полноценная цепочка:
+MonitoringService
